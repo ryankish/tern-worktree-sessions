@@ -42,23 +42,96 @@ local function inventory_launch(path, host_name)
 	return { cwd = path, block = "worktree.inventory", args = { path, host_name } }
 end
 
+local function leaves(tree, into)
+	if tree.pane then
+		table.insert(into, tree.pane)
+		return
+	end
+	if tree[1] then leaves(tree[1], into) end
+	if tree[2] then leaves(tree[2], into) end
+end
+
+local function set_share(cx, pane, direction, wanted, read_share)
+	local before = read_share()
+	if not before then return false end
+	if math.abs(before - wanted) < 0.005 then return true end
+	if not cx.layout:resize(pane, direction, 1) then return false end
+	local after = read_share()
+	cx.layout:resize(pane, direction, -1)
+	local restored = read_share()
+	if not after or not restored or after == before then return false end
+	local cells = math.floor((wanted - restored) / (after - before) + 0.5)
+	if cells ~= 0 and not cx.layout:resize(pane, direction, cells) then return false end
+	return true
+end
+
+local function normalize_ratios(cx, tab, nav)
+	local key = "layout-v2:" .. tostring(tab.id)
+	if tern.kv.get(key) then return end
+	local function root_share()
+		local layout = cx.session:layout(tab.id)
+		local root = layout and layout.root
+		if root and root.split == "right" and root[1] and root[1].pane == nav then
+			return root.ratio or 0.5
+		end
+		return nil
+	end
+	if not set_share(cx, nav, "right", 0.22, root_share) then return end
+	if tab.name == "editor" then
+		local layout = cx.session:layout(tab.id)
+		local content = layout and layout.root[2]
+		if content and content.split == "down" and content[1] and content[1].pane then
+			local function editor_share()
+				local current = cx.session:layout(tab.id)
+				local right = current and current.root[2]
+				return right and right.ratio or nil
+			end
+			if not set_share(cx, content[1].pane, "down", 0.65, editor_share) then return end
+		end
+	end
+	tern.kv.set(key, true)
+end
+
 local function ensure_inventories(cx, session_id, path)
 	local host_name = cx.hosts:current().name
 	for _, tab in cx.session:tabs() do
 		if tab.session == session_id then
-			local found = false
+			local layout = cx.session:layout(tab.id)
+			if not layout then continue end
+			local ordered = {}
+			leaves(layout.root, ordered)
+			local nav, content = nil, {}
+			local pane_info = {}
 			for _, pane in cx.session:panes() do
-				if pane.tab == tab.id and pane.block == "worktree.inventory" then
-					found = true
-					break
+				if pane.tab == tab.id then pane_info[pane.pane] = pane end
+			end
+			for _, pane in ordered do
+				local info = pane_info[pane]
+				if info and info.block == "worktree.inventory" then
+					nav = nav or pane
+				else
+					table.insert(content, pane)
 				end
 			end
-			if not found then
-				local opened = cx.layout:split(tab.pane, "left", inventory_launch(path, host_name),
+			if not nav and content[1] then
+				nav = cx.layout:split(content[1], "left", inventory_launch(path, host_name),
 					{ focus = false })
-				if not opened then
+				if not nav then
 					cx:toast("error", "Could not show worktrees in " .. (tab.name or "tab"))
 				end
+			end
+			if nav then
+				layout = cx.session:layout(tab.id)
+				local at_left = layout and layout.root.split == "right"
+					and layout.root[1] and layout.root[1].pane == nav
+				if not at_left and content[1] then
+					cx.layout:move(nav, content[1], "left", { focus = false })
+					if content[2] and (tab.name == "editor" or tab.name == "agents") then
+						cx.layout:move(content[2], content[1],
+							tab.name == "editor" and "down" or "right", { focus = false })
+					end
+				end
+				normalize_ratios(cx, tab, nav)
 			end
 		end
 	end
