@@ -1,6 +1,7 @@
 local PREFIX = "tern-wt:"
 local current_repo = nil
 local window_common_dir = nil
+local host_kind_sent = {}
 
 local function hex(bytes)
 	return (string.gsub(bytes, ".", function(byte)
@@ -39,8 +40,8 @@ local function repo_from_session(name)
 	return string.match(root, "([^/]+)$") or root
 end
 
-local function inventory_launch(path, host_name)
-	return { cwd = path, block = "worktree.inventory", args = { path, host_name } }
+local function inventory_launch(path, host_name, host_kind)
+	return { cwd = path, block = "worktree.inventory", args = { path, host_name, "", host_kind } }
 end
 
 local function leaves(tree, into)
@@ -117,13 +118,17 @@ local function ensure_inventories(cx, session_id, path)
 				end
 			end
 			if not nav and content[1] then
-				nav = cx.layout:split(content[1], "left", inventory_launch(path, host_name),
+				nav = cx.layout:split(content[1], "left", inventory_launch(path, host_name, host.kind),
 					{ focus = false })
 				if not nav then
 					cx:toast("error", "Could not show worktrees in " .. (tab.name or "tab"))
 				end
 			end
 			if nav then
+				if not host_kind_sent[nav] then
+					cx.session:event(nav, { ev = "action", act = "host_kind", value = host.kind })
+					host_kind_sent[nav] = true
+				end
 				layout = cx.session:layout(tab.id)
 				local at_left = layout and layout.root.split == "right"
 					and layout.root[1] and layout.root[1].pane == nav
@@ -147,7 +152,7 @@ local function set_repo(repo)
 	end
 end
 
-local function open_inventory(cx)
+local function open_inventory(cx, want_new)
 	local pane = cx.session:focused()
 	local info = pane and cx.session:pane(pane)
 	local host = cx.hosts:current()
@@ -155,6 +160,7 @@ local function open_inventory(cx)
 	for _, existing in cx.session:panes() do
 		if existing.block == "worktree.inventory" and existing.tab == tab then
 			cx.layout:focus(existing.pane)
+			if want_new then cx.session:event(existing.pane, { ev = "action", act = "new" }) end
 			return
 		end
 	end
@@ -165,7 +171,7 @@ local function open_inventory(cx)
 	local opened = cx.layout:split(pane, "left", {
 		cwd = info.cwd,
 		block = "worktree.inventory",
-		args = { info.cwd, host.name },
+		args = { info.cwd, host.name, want_new and "new" or "", host.kind },
 	})
 	if not opened then
 		cx:toast("error", "Cannot open worktree panel", "Install the plugin on " .. host.name)
@@ -222,7 +228,7 @@ local function initialize(cx, session, path, starter)
 
 	local editor, new_editor = create_tab(cx, session.id, "editor", {
 		name = "editor", cwd = path, split = "right", ratio = 0.22,
-		[1] = { launch = inventory_launch(path, host_name) },
+		[1] = { launch = inventory_launch(path, host_name, host.kind) },
 		[2] = { split = "down", ratio = 0.65,
 			[1] = { launch = { cwd = path } },
 			[2] = { launch = { cwd = path } },
@@ -242,7 +248,7 @@ local function initialize(cx, session, path, starter)
 	end
 	local agents = create_tab(cx, session.id, "agents", {
 		name = "agents", cwd = path, split = "right", ratio = 0.22,
-		[1] = { launch = inventory_launch(path, host_name) },
+		[1] = { launch = inventory_launch(path, host_name, host.kind) },
 		[2] = { split = "right", ratio = 0.5,
 			[1] = { launch = { cwd = path } },
 			[2] = { launch = { cwd = path } },
@@ -251,7 +257,7 @@ local function initialize(cx, session, path, starter)
 	if not agents then return end
 	local git_tab, new_git = create_tab(cx, session.id, "git", {
 		name = "git", cwd = path, split = "right", ratio = 0.22,
-		[1] = { launch = inventory_launch(path, host_name) },
+		[1] = { launch = inventory_launch(path, host_name, host.kind) },
 		[2] = { launch = { cwd = path } },
 	})
 	if not git_tab then return end
@@ -326,16 +332,44 @@ end
 
 tern.command({ id = "discover", title = "Worktree: Discover", icon = "branch", run = open_inventory })
 tern.command({ id = "switch", title = "Worktree: Switch", icon = "branch", run = open_inventory })
+tern.command({ id = "new", title = "Worktree: New", icon = "plus", run = function(cx)
+	open_inventory(cx, true)
+end })
 tern.override("new_tab", new_worktree_shell)
 
+local function refresh_repo_inventories(cx, common_dir)
+	local host_id = cx.hosts:current().id
+	local sessions = {}
+	for _, session in cx.sessions:list() do
+		local identity = session_identity(session.name)
+		if session.host == host_id and identity and identity.common_dir == common_dir then
+			sessions[session.id] = true
+		end
+	end
+	local tabs = {}
+	for _, tab in cx.session:tabs() do
+		if sessions[tab.session] then tabs[tab.id] = true end
+	end
+	for _, pane in cx.session:panes() do
+		if tabs[pane.tab] and pane.block == "worktree.inventory" then
+			cx.session:event(pane.pane, { ev = "action", act = "refresh" })
+		end
+	end
+end
+
 tern.route.link(function(link, cx)
-	local encoded_common, encoded_path = string.match(link.url,
-		"^tern%-worktree://switch/([0-9a-f]+)/([0-9a-f]+)$")
-	if not encoded_common then return nil end
-	local source = link.pane and cx.session:pane(link.pane)
-	if not source or source.block ~= "worktree.inventory" then return { handled = true } end
+	local action, encoded_common, encoded_path = string.match(link.url,
+		"^tern%-worktree://([a-z]+)/([0-9a-f]+)/([0-9a-f]+)$")
+	if action ~= "switch" and action ~= "created" then return nil end
 	local common_dir, path = unhex(encoded_common), unhex(encoded_path)
-	if common_dir and path then switch_to(cx, common_dir, path) end
+	if not common_dir or not path then return { handled = true } end
+	local source = link.pane and cx.session:pane(link.pane)
+	-- Delayed host effects can arrive after focus has moved away from the
+	-- inventory block. Once bound, the repo identity still scopes the link.
+	if (not source or source.block ~= "worktree.inventory")
+		and window_common_dir ~= common_dir then return { handled = true } end
+	switch_to(cx, common_dir, path)
+	if action == "created" then refresh_repo_inventories(cx, common_dir) end
 	return { handled = true }
 end)
 

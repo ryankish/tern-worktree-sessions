@@ -34,3 +34,17 @@ on the session's Tern host. New shell tabs go immediately before `git`; the
 plugin also moves `git` back to the right edge when a managed tab is focused.
 If Tern does not know the focused pane's directory, it shows an error instead
 of guessing a different directory.
+
+Click **+ New Worktree**, press `n` while the worktree pane is focused, or run
+**Worktree: New** from the command palette. Enter a branch name and press Enter.
+An existing local branch is checked out; a new branch starts at the current
+worktree's HEAD. The path is chosen under a sibling `<repo>-worktrees`
+directory, with a numeric suffix when needed. Git runs on the pane's host.
+
+If `<repo-root>/.tern/worktree-setup` exists, the plugin runs it on that host
+after `git worktree add` and before opening the default tabs. The hook must be
+executable. It runs in the new worktree with these positional arguments:
+`repo-root`, `new-worktree-path`, `branch`. It also receives
+`TERN_WORKTREE_REPO_ROOT`, `TERN_WORKTREE_PATH`, `TERN_WORKTREE_BRANCH`,
+`TERN_WORKTREE_HOST`, and `TERN_WORKTREE_HOST_KIND`. A failed hook leaves the
+worktree in place and offers **Retry setup** or **Open workspace anyway**.
