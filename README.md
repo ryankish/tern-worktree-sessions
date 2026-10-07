@@ -16,6 +16,9 @@ row to switch to its persistent Tern session. The first click creates its
 `editor`, `agents`, and `git` tabs with the default commands and split ratios;
 later clicks adopt the same session without restarting its programs. The
 `Worktree: Switch` command opens the inventory from another tab or session.
+The command tabs start as interactive shells, then Tern types `nvim`, `codex`,
+or `lazygit` into them. This loads shell aliases such as `codex` from `.zshrc`
+and leaves a usable shell if a command is missing or exits.
 
 Sessions use an exact encoding of the Git common directory and worktree path,
 so branch renames do not change their identity. Tern 0.5.3 has no plugin API for

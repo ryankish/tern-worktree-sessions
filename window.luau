@@ -107,8 +107,8 @@ local function initialize(cx, session, path)
 		name = "editor", cwd = path, split = "right", ratio = 0.22,
 		[1] = { launch = inventory_launch(path, host_name) },
 		[2] = { split = "down", ratio = 0.65,
-			[1] = { launch = { cwd = path, command = "nvim" } },
-			[2] = { launch = { cwd = path, command = "codex" } },
+			[1] = { launch = { cwd = path } },
+			[2] = { launch = { cwd = path } },
 		},
 	})
 	if not editor then
@@ -130,11 +130,28 @@ local function initialize(cx, session, path)
 	local git_tab, git_error = cx.layout:tab({
 		name = "git", cwd = path, split = "right", ratio = 0.22,
 		[1] = { launch = inventory_launch(path, host_name) },
-		[2] = { launch = { cwd = path, command = "lazygit" } },
+		[2] = { launch = { cwd = path } },
 	})
 	if not git_tab then
 		cx:toast("error", "Could not create git tab", git_error)
 		return
+	end
+	-- Tern command launches use a noninteractive shell. Type into the ordinary
+	-- interactive shells so aliases work and failures leave a usable prompt.
+	local editor_tree = cx.session:layout(editor)
+	local git_tree = cx.session:layout(git_tab)
+	if editor_tree and editor_tree.root[2] and editor_tree.root[2][1]
+		and editor_tree.root[2][1].pane and editor_tree.root[2][2]
+		and editor_tree.root[2][2].pane then
+		cx:run(editor_tree.root[2][1].pane, "nvim\r")
+		cx:run(editor_tree.root[2][2].pane, "codex\r")
+	else
+		cx:toast("error", "Could not start editor commands", "Editor pane layout is unavailable")
+	end
+	if git_tree and git_tree.root[2] and git_tree.root[2].pane then
+		cx:run(git_tree.root[2].pane, "lazygit\r")
+	else
+		cx:toast("error", "Could not start lazygit", "Git pane layout is unavailable")
 	end
 	if starter then cx.layout:close(starter) end
 	local layout = cx.session:layout(editor)
