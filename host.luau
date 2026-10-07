@@ -8,6 +8,26 @@ local function alive(pane)
 	return false
 end
 
+local function within(path, root)
+	return path == root or string.sub(path, 1, #root + 1) == root .. "/"
+end
+
+local function active_worktree(state)
+	local active = nil
+	for _, entry in state.entries do
+		if within(state.cwd, entry.path) and (not active or #entry.path > #active.path) then
+			active = entry
+		end
+	end
+	return active
+end
+
+local function project_name(state)
+	local first = state.entries[1]
+	local path = first and first.path or state.cwd
+	return string.match(path, "([^/]+)/?$") or path
+end
+
 local function refresh(state, cx)
 	state.generation += 1
 	local generation = state.generation
@@ -58,28 +78,40 @@ tern.block.define("inventory", {
 	end,
 	title = function() return "worktrees" end,
 	view = function(state)
-		local rows = {
-			ui.text({ ui.span("Repository worktrees", "strong") }),
-			ui.text({ ui.span("Host: " .. state.host, "muted") }),
-		}
-		if state.common_dir then
-			table.insert(rows, ui.text({ ui.span("Git common dir: " .. state.common_dir, "muted") }))
-		end
+		local rows = { ui.text({ ui.span(string.upper(project_name(state)), "strong") }),
+			ui.text({ ui.span(state.host, "muted") }), ui.rule("") }
 		if state.error then table.insert(rows, ui.text({ ui.span(state.error, "error") })) end
 		if state.loading then table.insert(rows, ui.text({ ui.span("Refreshing…", "muted") })) end
+		local active = active_worktree(state)
+		local items = {}
 		for _, entry in state.entries do
 			local label = entry.branch and string.gsub(entry.branch, "^refs/heads/", "")
 				or (entry.bare and "(bare)" or "(detached " .. string.sub(entry.head, 1, 8) .. ")")
-			local flags = entry.prunable and " [prunable]" or (entry.locked and " [locked]" or "")
-			table.insert(rows, ui.text({ ui.span(label .. flags, "strong") }))
-			table.insert(rows, ui.text({ ui.span("  " .. entry.path, "muted") }))
+			local value = entry.prunable and "prunable" or (entry.locked and "locked" or nil)
+			table.insert(items, ui.node("item", {
+				key = tostring(#items + 1),
+				label = (entry == active and "● " or "  ") .. label,
+				detail = entry.path,
+				value = value,
+				icon = "branch",
+				tone = entry == active and "accent" or (entry.prunable and "warning" or nil),
+			}))
 		end
+		table.insert(rows, ui.section("WORKTREES", items))
+		table.insert(rows, ui.rule(""))
+		table.insert(rows, ui.node("item", {
+			key = "refresh", label = "↻ Refresh", icon = "refresh",
+			actions = { click = "refresh" },
+		}))
 		return { main = ui.col(rows), dock = ui.col({ ui.text({ ui.span("Press r to refresh", "muted") }) }) }
 	end,
 	key = function(state, key, cx)
 		if key.name ~= "r" then return false end
 		refresh(state, cx)
 		return true
+	end,
+	event = function(state, ev, cx)
+		if ev.ev == "action" and ev.act == "refresh" then refresh(state, cx) end
 	end,
 	save = function(state)
 		return { cwd = state.cwd, host = state.host, common_dir = state.common_dir,
