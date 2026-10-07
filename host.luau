@@ -99,9 +99,10 @@ end
 local function finish_created(state, cx)
 	local created = state.created
 	if not created then return end
+	local completed = state.setup_error == nil
 	tern.kv.set("setup:" .. hex(state.common_dir) .. ":" .. hex(created.path), {
-		choices = created.setup_answers or {}, policy_root = created.repo_root,
-		completed = state.setup_error == nil,
+		choices = created.setup_answers or {}, policy_root = created.source_root or created.repo_root,
+		completed = completed,
 	})
 	state.created = nil
 	state.creating = false
@@ -114,7 +115,12 @@ local function finish_created(state, cx)
 	state.setup_selected = false
 	cx:save()
 	refresh(state, cx)
-	cx:open("tern-worktree://created/" .. hex(state.common_dir) .. "/" .. hex(created.path))
+	if created.existing then
+		cx:toast(completed and "success" or "info",
+			completed and "Worktree setup complete" or "Worktree setup skipped", created.path)
+	else
+		cx:open("tern-worktree://created/" .. hex(state.common_dir) .. "/" .. hex(created.path))
+	end
 end
 
 local function setup_failed(state, cx, message)
@@ -129,7 +135,7 @@ end
 local function run_setup(state, cx)
 	local created = state.created
 	if not created or state.creating then return end
-	local hook = created.repo_root .. "/" .. config.setup_hook
+	local hook = (created.source_root or created.repo_root) .. "/" .. config.setup_hook
 	if not tern.fs.exists(hook) then
 		if created.has_policy then
 			setup_failed(state, cx, "Configured setup hook is missing: " .. hook)
@@ -150,6 +156,7 @@ local function run_setup(state, cx)
 				TERN_WORKTREE_REPO_ROOT = created.repo_root,
 				TERN_WORKTREE_PATH = created.path,
 				TERN_WORKTREE_BRANCH = created.branch,
+				TERN_WORKTREE_SETUP_SOURCE = created.source_root or created.repo_root,
 				TERN_WORKTREE_HOST = state.host,
 				TERN_WORKTREE_HOST_KIND = state.host_kind,
 				TERN_WORKTREE_SETUP_CHOICES_JSON = created.has_policy
@@ -187,14 +194,21 @@ local function create_worktree(state, cx)
 	end
 	local path, path_error, repo_root = new_path(state, branch)
 	if not path then state.error = path_error; cx:render(); return end
+	local source = active_worktree(state)
+	if not source or source.prunable or source.bare then
+		state.error = "Select an available worktree before creating another"
+		cx:render()
+		return
+	end
+	local source_root = source.path
 	if not state.setup_selected then
-		local policy_path = repo_root .. "/" .. config.setup_hook .. ".json"
+		local policy_path = source_root .. "/" .. config.setup_hook .. ".json"
 		if tern.fs.exists(policy_path) then
 			local ok, bytes = pcall(tern.fs.read, policy_path, 65536)
 			if not ok then state.error = "Cannot read setup policy: " .. tostring(bytes); cx:render(); return end
 			local questions, err = setup_policy.parse(bytes)
 			if not questions then state.error = err; cx:render(); return end
-			if not tern.fs.exists(repo_root .. "/" .. config.setup_hook) then
+			if not tern.fs.exists(source_root .. "/" .. config.setup_hook) then
 				state.error = "Setup policy exists, but its hook is missing"
 				cx:render()
 				return
@@ -254,12 +268,66 @@ local function create_worktree(state, cx)
 							return
 						end
 						state.created = { path = path, branch = branch, repo_root = repo_root,
+							source_root = source_root,
 							setup_answers = state.setup_answers, has_policy = state.has_policy }
 						cx:save()
 						run_setup(state, cx)
 					end)
 				end)
 		end)
+end
+
+local function begin_existing_setup(state, cx, index)
+	if state.creating or state.created or not state.ready then return end
+	local entry = state.entries[index]
+	if not entry or entry.bare or entry.prunable or not tern.fs.exists(entry.path) then
+		state.error = "Choose an available worktree"
+		cx:render()
+		return
+	end
+	local hook = entry.path .. "/" .. config.setup_hook
+	if not tern.fs.exists(hook) then
+		state.error = "This worktree has no setup hook: " .. hook
+		cx:render()
+		return
+	end
+	local policy_path = hook .. ".json"
+	local questions = nil
+	if tern.fs.exists(policy_path) then
+		local ok, bytes = pcall(tern.fs.read, policy_path, 65536)
+		if not ok then state.error = "Cannot read setup policy: " .. tostring(bytes); cx:render(); return end
+		local err
+		questions, err = setup_policy.parse(bytes)
+		if not questions then state.error = err; cx:render(); return end
+	end
+	local primary = nil
+	for _, candidate in state.entries do
+		if not candidate.bare and not candidate.prunable then primary = candidate; break end
+	end
+	if not primary then
+		state.error = "Cannot determine an available checkout for setup"
+		cx:render()
+		return
+	end
+	local branch = entry.branch and string.gsub(entry.branch, "^refs/heads/", "") or "HEAD"
+	state.setup_answers = {}
+	state.setup_questions = questions
+	state.setup_index = 1
+	state.has_policy = questions ~= nil
+	state.setup_selected = questions == nil
+	state.setup_error = nil
+	state.error = nil
+	state.created = { path = entry.path, branch = branch, repo_root = primary.path,
+		source_root = entry.path, setup_answers = state.setup_answers,
+		has_policy = state.has_policy, existing = true, choices_complete = questions == nil }
+	if questions then
+		state.mode = "setup_choices"
+		cx:save()
+		cx:render()
+	else
+		cx:save()
+		run_setup(state, cx)
+	end
 end
 
 local function select_setup_choice(state, cx, index)
@@ -274,8 +342,15 @@ local function select_setup_choice(state, cx, index)
 		return
 	end
 	state.setup_selected = true
-	state.mode = "new"
-	create_worktree(state, cx)
+	if state.created and state.created.existing then
+		state.created.choices_complete = true
+		state.mode = "setup_running"
+		cx:save()
+		run_setup(state, cx)
+	else
+		state.mode = "new"
+		create_worktree(state, cx)
+	end
 end
 
 local function select_removal(state, cx, index)
@@ -400,6 +475,10 @@ end
 
 tern.block.define("inventory", {
 	init = function(cx, args, saved)
+		local pending = saved and saved.pending or nil
+		-- A reopened choice prompt has not run anything yet. Never retry its
+		-- partially collected answers as if setup had already begun.
+		if pending and pending.existing and not pending.choices_complete then pending = nil end
 		local state = {
 			cwd = (saved and saved.cwd) or args[1] or cx.cwd or "",
 			host = (saved and saved.host) or args[2] or "unknown",
@@ -409,15 +488,16 @@ tern.block.define("inventory", {
 			ready = false,
 			error = nil,
 			generation = 0,
-			mode = saved and saved.pending and "setup_failed"
-				or ((args[3] == "new" or args[3] == "remove") and args[3] or "list"),
+			mode = pending and "setup_failed"
+				or ((args[3] == "new" or args[3] == "remove") and args[3]
+					or (args[3] == "setup" and "setup_select") or "list"),
 			host_kind = (saved and saved.host_kind) or args[4] or "unknown",
 			branch = "",
 			creating = false,
 			progress = nil,
 			pending_branch = nil,
-			created = saved and saved.pending or nil,
-			setup_error = saved and saved.setup_error or nil,
+			created = pending,
+			setup_error = pending and saved.setup_error or nil,
 			setup_questions = nil,
 			setup_answers = nil,
 			setup_index = 1,
@@ -464,7 +544,7 @@ tern.block.define("inventory", {
 		if state.mode == "setup_choices" then
 			local question = state.setup_questions[state.setup_index]
 			table.insert(rows, ui.text({ ui.span("SETUP CHOICES", "strong") }))
-			table.insert(rows, ui.text({ ui.span(state.branch, "muted") }))
+			table.insert(rows, ui.text({ ui.span(state.created and state.created.path or state.branch, "muted") }))
 			table.insert(rows, ui.text(question.label))
 			if question.description then table.insert(rows, ui.text({ ui.span(question.description, "muted") })) end
 			for index, choice in question.choices do
@@ -477,13 +557,28 @@ tern.block.define("inventory", {
 				}))
 			end
 			table.insert(rows, ui.node("item", {
-				key = "setup-back", label = "Back to branch", actions = { click = "setup_back" },
+				key = "setup-back", label = state.created and "Back to worktrees" or "Back to branch",
+				actions = { click = "setup_back" },
 			}))
+		end
+		if state.mode == "setup_select" then
+			table.insert(rows, ui.text({ ui.span("RUN SETUP", "strong") }))
+			table.insert(rows, ui.text({ ui.span("Choose a worktree", "muted") }))
+			for index, entry in state.entries do
+				if not entry.bare and not entry.prunable then
+					table.insert(rows, ui.node("item", {
+						key = "setup-" .. tostring(index),
+						label = tostring(index) .. ". " .. worktree_label(entry), detail = entry.path,
+						actions = { click = "setup_select=" .. tostring(index) },
+					}))
+				end
+			end
 		end
 		if state.mode == "setup_running" or state.mode == "setup_failed" then
 			local created = state.created
 			if created then
-				table.insert(rows, ui.text({ ui.span("NEW WORKTREE", "strong") }))
+				table.insert(rows, ui.text({ ui.span(created.existing and "WORKTREE SETUP"
+					or "NEW WORKTREE", "strong") }))
 				table.insert(rows, ui.text(created.path))
 				if state.creating then
 					table.insert(rows, ui.text({ ui.span(state.progress or "Running setup…", "muted") }))
@@ -492,7 +587,8 @@ tern.block.define("inventory", {
 						key = "retry", label = "Retry setup", actions = { click = "retry_setup" },
 					}))
 					table.insert(rows, ui.node("item", {
-						key = "continue", label = "Open workspace anyway",
+						key = "continue", label = created.existing and "Dismiss setup failure"
+							or "Open workspace anyway",
 						actions = { click = "continue_setup" },
 					}))
 				end
@@ -559,14 +655,20 @@ tern.block.define("inventory", {
 			actions = { click = "remove" },
 		}))
 		table.insert(rows, ui.node("item", {
+			key = "setup", label = "Run Setup", icon = "play",
+			disabled = state.mode ~= "list" or state.creating or state.created ~= nil,
+			actions = { click = "setup" },
+		}))
+		table.insert(rows, ui.node("item", {
 			key = "refresh", label = "↻ Refresh", icon = "refresh",
 			actions = { click = "refresh" },
 		}))
-		local hint = state.mode == "setup_failed" and "s: retry setup · c: open anyway"
+		local hint = state.mode == "setup_failed" and "s: retry setup · c: dismiss"
 			or (state.mode == "setup_choices" and "1–9: select · Enter: default · Esc: back")
+			or (state.mode == "setup_select" and "1–9: select · Esc: cancel")
 			or (state.mode == "remove" and "1–9: select · Esc: cancel")
 			or (state.mode == "remove_confirm" and "Enter: remove · Esc: cancel")
-			or "n: new · d: remove · r: refresh"
+			or "n: new · s: setup · d: remove · r: refresh"
 		return { main = ui.col(rows), dock = ui.col({ ui.text({ ui.span(hint, "muted") }) }) }
 	end,
 	key = function(state, key, cx)
@@ -598,9 +700,11 @@ tern.block.define("inventory", {
 		end
 		if state.mode == "setup_choices" then
 			if key.name == "escape" then
-				state.mode = "new"
+				local existing = state.created and state.created.existing
+				state.mode = existing and "setup_select" or "new"
+				if existing then state.created = nil; cx:save() end
 				state.setup_selected = false
-				cx:frame({ { "focus", "main.branch" } })
+				if not existing then cx:frame({ { "focus", "main.branch" } }) end
 				return true
 			end
 			local question = state.setup_questions[state.setup_index]
@@ -613,6 +717,14 @@ tern.block.define("inventory", {
 			local number = tonumber(key.name)
 			if number and number >= 1 and number <= 9 then
 				select_setup_choice(state, cx, number)
+				return true
+			end
+		end
+		if state.mode == "setup_select" then
+			if key.name == "escape" then state.mode = "list"; state.error = nil; return true end
+			local number = tonumber(key.name)
+			if number and number >= 1 and number <= 9 then
+				begin_existing_setup(state, cx, number)
 				return true
 			end
 		end
@@ -641,6 +753,11 @@ tern.block.define("inventory", {
 			state.error = nil
 			return true
 		end
+		if key.name == "s" and state.mode == "list" and not state.creating and not state.created then
+			state.mode = "setup_select"
+			state.error = nil
+			return true
+		end
 		if key.name ~= "r" then return false end
 		refresh(state, cx)
 		return true
@@ -664,10 +781,20 @@ tern.block.define("inventory", {
 			select_setup_choice(state, cx, tonumber(ev.value))
 		elseif ev.act == "setup_back" then
 			if state.mode == "setup_choices" then
-				state.mode = "new"
+				local existing = state.created and state.created.existing
+				state.mode = existing and "setup_select" or "new"
+				if existing then state.created = nil; cx:save() end
 				state.setup_selected = false
-				cx:frame({ { "focus", "main.branch" } })
+				if not existing then cx:frame({ { "focus", "main.branch" } }) end
 			end
+		elseif ev.act == "setup" then
+			if state.mode == "list" and not state.creating and not state.created then
+				state.mode = "setup_select"
+				state.error = nil
+				cx:render()
+			end
+		elseif ev.act == "setup_select" then
+			if state.mode == "setup_select" then begin_existing_setup(state, cx, tonumber(ev.value)) end
 		elseif ev.act == "remove" then
 			if state.mode == "list" and not state.creating and not state.created then
 				state.mode = "remove"

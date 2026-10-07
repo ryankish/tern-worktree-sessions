@@ -3,6 +3,7 @@ local config = require("./config")
 local current_repo = nil
 local window_common_dir = nil
 local host_kind_sent = {}
+local initialized_shells = {}
 
 local function hex(bytes)
 	return (string.gsub(bytes, ".", function(byte)
@@ -43,6 +44,34 @@ end
 
 local function inventory_launch(path, host_name, host_kind)
 	return { cwd = path, block = "worktree.inventory", args = { path, host_name, "", host_kind } }
+end
+
+local function shell_quote(value)
+	return "'" .. string.gsub(value, "'", "'\"'\"'") .. "'"
+end
+
+local function within(path, root)
+	return path == root or root == "/" or string.sub(path, 1, #root + 1) == root .. "/"
+end
+
+local function shell_startup(path, command)
+	local root = shell_quote(path)
+	local hook = shell_quote(path .. "/" .. config.shell_hook)
+	local init = "export TERN_WORKTREE_PATH=" .. root
+		.. "; if [ -f " .. hook .. " ]; then . " .. hook .. "; fi"
+	return init .. (command and " && " .. command or "") .. "\r"
+end
+
+local function start_shell(cx, pane, path, command)
+	initialized_shells[pane] = true
+	local info = cx.session:pane(pane)
+	local program = info and string.match(info.program or "", "([^/]+)$") or nil
+	if program == "fish" or program == "nu" or program == "pwsh" then
+		cx:toast("error", "Worktree shell hook needs a POSIX-compatible shell", program)
+		if command then cx:run(pane, command .. "\r") end
+		return
+	end
+	cx:run(pane, shell_startup(path, command))
 end
 
 local function leaves(tree, into)
@@ -241,13 +270,13 @@ local function initialize(cx, session, path, starter)
 		local tree = cx.session:layout(editor)
 		local content = tree and tree.root[2]
 		if content and content[1] and content[1].pane and content[2] and content[2].pane then
-			cx:run(content[1].pane, config.editor_command .. "\r")
-			cx:run(content[2].pane, config.agent_command .. "\r")
+			start_shell(cx, content[1].pane, path, config.editor_command)
+			start_shell(cx, content[2].pane, path, config.agent_command)
 		else
 			cx:toast("error", "Could not start editor commands", "Editor pane layout is unavailable")
 		end
 	end
-	local agents = create_tab(cx, session.id, "agents", {
+	local agents, new_agents = create_tab(cx, session.id, "agents", {
 		name = "agents", cwd = path, split = "right", ratio = 0.22,
 		[1] = { launch = inventory_launch(path, host_name, host.kind) },
 		[2] = { split = "right", ratio = config.agents_split_ratio,
@@ -256,6 +285,14 @@ local function initialize(cx, session, path, starter)
 		},
 	})
 	if not agents then return end
+	if new_agents then
+		local tree = cx.session:layout(agents)
+		local content = tree and tree.root[2]
+		if content and content[1] and content[1].pane and content[2] and content[2].pane then
+			start_shell(cx, content[1].pane, path)
+			start_shell(cx, content[2].pane, path)
+		end
+	end
 	local git_tab, new_git = create_tab(cx, session.id, "git", {
 		name = "git", cwd = path, split = "right", ratio = 0.22,
 		[1] = { launch = inventory_launch(path, host_name, host.kind) },
@@ -265,7 +302,7 @@ local function initialize(cx, session, path, starter)
 	if new_git then
 		local tree = cx.session:layout(git_tab)
 		if tree and tree.root[2] and tree.root[2].pane then
-			cx:run(tree.root[2].pane, config.git_command .. "\r")
+			start_shell(cx, tree.root[2].pane, path, config.git_command)
 		else
 			cx:toast("error", "Could not start lazygit", "Git pane layout is unavailable")
 		end
@@ -295,6 +332,7 @@ local function new_worktree_shell(cx)
 		cx:toast("error", "Could not open worktree shell")
 		return true
 	end
+	start_shell(cx, opened, identity.path)
 	keep_git_last(cx, session.id)
 	ensure_inventories(cx, session.id, identity.path)
 	return true
@@ -338,6 +376,9 @@ tern.command({ id = "new", title = "Worktree: New", icon = "plus", run = functio
 end })
 tern.command({ id = "remove", title = "Worktree: Remove", icon = "trash", run = function(cx)
 	open_inventory(cx, "remove")
+end })
+tern.command({ id = "run_setup", title = "Worktree: Run Setup", icon = "play", run = function(cx)
+	open_inventory(cx, "setup")
 end })
 tern.override("new_tab", new_worktree_shell)
 
@@ -424,6 +465,25 @@ end)
 
 tern.on("focus", function(_, cx)
 	show_current_repo(cx)
+end)
+
+-- A normal Tern pane split also starts a shell. Only the initiating window
+-- focuses its new pane, so this avoids sourcing twice in shared sessions.
+tern.on("pane_created", function(ev, cx)
+	if initialized_shells[ev.pane] or cx.session:focused() ~= ev.pane then return end
+	local identity = session_identity(cx.sessions:current().name)
+	if not identity then return end
+	local pane = cx.session:pane(ev.pane)
+	if not pane or pane.block or not pane.cwd or not within(pane.cwd, identity.path) then return end
+	local program = string.match(pane.program or "", "([^/]+)$")
+	if program == "zsh" or program == "bash" or program == "sh" or program == "ksh"
+		or program == "dash" or program == "ash" then
+		start_shell(cx, ev.pane, identity.path)
+	end
+end)
+
+tern.on("pane_closed", function(ev)
+	initialized_shells[ev.pane] = nil
 end)
 
 tern.on("tab_created", function(ev, cx)
