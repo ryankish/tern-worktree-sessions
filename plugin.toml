@@ -1,0 +1,14 @@
+schema = 1
+id = "worktree"
+name = "Worktree Workspace"
+version = "0.1.0"
+description = "Git worktree discovery and workspace navigation."
+icon = "git-branch"
+host = "host.luau"
+window = "window.luau"
+
+[[blocks]]
+id = "inventory"
+title = "Worktree Inventory"
+icon = "git-branch"
+palette = false
