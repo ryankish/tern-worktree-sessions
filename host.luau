@@ -9,7 +9,7 @@ local function alive(pane)
 end
 
 local function within(path, root)
-	return path == root or string.sub(path, 1, #root + 1) == root .. "/"
+	return path == root or root == "/" or string.sub(path, 1, #root + 1) == root .. "/"
 end
 
 local function active_worktree(state)
@@ -101,7 +101,7 @@ tern.block.define("inventory", {
 				value = value,
 				icon = "branch",
 				tone = entry == active and "accent" or (entry.prunable and "warning" or nil),
-				disabled = entry.prunable or entry.bare,
+				disabled = state.error ~= nil or entry.prunable or entry.bare,
 				actions = { click = "switch=" .. tostring(index) },
 			}))
 		end
@@ -125,7 +125,7 @@ tern.block.define("inventory", {
 		elseif ev.act == "switch" then
 			local index = tonumber(ev.value)
 			local entry = index and state.entries[index]
-			if entry and not entry.prunable and not entry.bare and state.common_dir then
+			if entry and not state.error and not entry.prunable and not entry.bare and state.common_dir then
 				cx:open("tern-worktree://switch/" .. hex(state.common_dir) .. "/" .. hex(entry.path))
 			end
 		end

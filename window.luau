@@ -1,5 +1,6 @@
 local PREFIX = "tern-wt:"
 local current_repo = nil
+local window_common_dir = nil
 
 local function hex(bytes)
 	return (string.gsub(bytes, ".", function(byte)
@@ -93,7 +94,9 @@ local function normalize_ratios(cx, tab, nav)
 end
 
 local function ensure_inventories(cx, session_id, path)
-	local host_name = cx.hosts:current().name
+	local host = cx.hosts:current()
+	if host.state ~= "connected" then return end
+	local host_name = host.name
 	for _, tab in cx.session:tabs() do
 		if tab.session == session_id then
 			local layout = cx.session:layout(tab.id)
@@ -169,14 +172,41 @@ local function open_inventory(cx)
 	end
 end
 
-local function initialize(cx, session, path)
-	local host_name = cx.hosts:current().name
-	local starter = nil
+local function named_tab(cx, session_id, name)
 	for _, tab in cx.session:tabs() do
-		if tab.session == session.id then starter = tab.pane; break end
+		if tab.session == session_id and tab.name == name then return tab.id end
 	end
+	return nil
+end
 
-	local editor, editor_error = cx.layout:tab({
+local function create_tab(cx, session_id, name, spec)
+	local existing = named_tab(cx, session_id, name)
+	if existing then return existing, false end
+	local tab, err = cx.layout:tab(spec)
+	if err then
+		cx:toast("error", "Could not create " .. name .. " tab", err)
+		-- A later leaf can fail after Tern has already created part of the tab.
+		-- Discard only this new, incomplete tab so a later switch can retry.
+		if tab then
+			for _, pane in cx.session:panes() do
+				if pane.tab == tab then cx.layout:close(pane.pane) end
+			end
+		end
+		return nil, false
+	end
+	if not tab then
+		cx:toast("error", "Could not create " .. name .. " tab")
+		return nil, false
+	end
+	return tab, true
+end
+
+local function initialize(cx, session, path, starter)
+	local host = cx.hosts:current()
+	if host.state ~= "connected" then return end
+	local host_name = host.name
+
+	local editor, new_editor = create_tab(cx, session.id, "editor", {
 		name = "editor", cwd = path, split = "right", ratio = 0.22,
 		[1] = { launch = inventory_launch(path, host_name) },
 		[2] = { split = "down", ratio = 0.65,
@@ -184,11 +214,19 @@ local function initialize(cx, session, path)
 			[2] = { launch = { cwd = path } },
 		},
 	})
-	if not editor then
-		cx:toast("error", "Could not create editor tab", editor_error)
-		return
+	if not editor then return end
+	if new_editor then
+		-- Type into login shells so aliases work and failed commands leave a prompt.
+		local tree = cx.session:layout(editor)
+		local content = tree and tree.root[2]
+		if content and content[1] and content[1].pane and content[2] and content[2].pane then
+			cx:run(content[1].pane, "nvim\r")
+			cx:run(content[2].pane, "codex\r")
+		else
+			cx:toast("error", "Could not start editor commands", "Editor pane layout is unavailable")
+		end
 	end
-	local agents, agents_error = cx.layout:tab({
+	local agents = create_tab(cx, session.id, "agents", {
 		name = "agents", cwd = path, split = "right", ratio = 0.22,
 		[1] = { launch = inventory_launch(path, host_name) },
 		[2] = { split = "right", ratio = 0.5,
@@ -196,39 +234,26 @@ local function initialize(cx, session, path)
 			[2] = { launch = { cwd = path } },
 		},
 	})
-	if not agents then
-		cx:toast("error", "Could not create agents tab", agents_error)
-		return
-	end
-	local git_tab, git_error = cx.layout:tab({
+	if not agents then return end
+	local git_tab, new_git = create_tab(cx, session.id, "git", {
 		name = "git", cwd = path, split = "right", ratio = 0.22,
 		[1] = { launch = inventory_launch(path, host_name) },
 		[2] = { launch = { cwd = path } },
 	})
-	if not git_tab then
-		cx:toast("error", "Could not create git tab", git_error)
-		return
-	end
-	-- Tern command launches use a noninteractive shell. Type into the ordinary
-	-- interactive shells so aliases work and failures leave a usable prompt.
-	local editor_tree = cx.session:layout(editor)
-	local git_tree = cx.session:layout(git_tab)
-	if editor_tree and editor_tree.root[2] and editor_tree.root[2][1]
-		and editor_tree.root[2][1].pane and editor_tree.root[2][2]
-		and editor_tree.root[2][2].pane then
-		cx:run(editor_tree.root[2][1].pane, "nvim\r")
-		cx:run(editor_tree.root[2][2].pane, "codex\r")
-	else
-		cx:toast("error", "Could not start editor commands", "Editor pane layout is unavailable")
-	end
-	if git_tree and git_tree.root[2] and git_tree.root[2].pane then
-		cx:run(git_tree.root[2].pane, "lazygit\r")
-	else
-		cx:toast("error", "Could not start lazygit", "Git pane layout is unavailable")
+	if not git_tab then return end
+	if new_git then
+		local tree = cx.session:layout(git_tab)
+		if tree and tree.root[2] and tree.root[2].pane then
+			cx:run(tree.root[2].pane, "lazygit\r")
+		else
+			cx:toast("error", "Could not start lazygit", "Git pane layout is unavailable")
+		end
 	end
 	if starter then cx.layout:close(starter) end
-	local layout = cx.session:layout(editor)
-	if layout then cx.layout:focus(layout.focus) end
+	if starter then
+		local layout = cx.session:layout(editor)
+		if layout then cx.layout:focus(layout.focus) end
+	end
 end
 
 local function switch_to(cx, common_dir, path)
@@ -236,19 +261,30 @@ local function switch_to(cx, common_dir, path)
 		cx:toast("error", "Invalid worktree path")
 		return
 	end
+	if window_common_dir and window_common_dir ~= common_dir then
+		cx:toast("error", "This window belongs to another repository",
+			"Open the other repository in a separate Tern window")
+		return
+	end
+	window_common_dir = common_dir
 	local name = session_name(common_dir, path)
 	local host = cx.hosts:current()
 	for _, session in cx.sessions:list() do
 		if session.host == host.id and session.name == name then
 			cx.sessions:switch(session.id)
 			set_repo(repo_from_session(name))
+			initialize(cx, session, path, nil)
 			ensure_inventories(cx, session.id, path)
 			return
 		end
 	end
 	local session = cx.sessions:create({ name = name, cwd = path })
+	local starter = nil
+	for _, tab in cx.session:tabs() do
+		if tab.session == session.id then starter = tab.pane; break end
+	end
 	set_repo(repo_from_session(name))
-	initialize(cx, session, path)
+	initialize(cx, session, path, starter)
 end
 
 tern.command({ id = "discover", title = "Worktree: Discover", icon = "branch", run = open_inventory })
@@ -272,9 +308,14 @@ end)
 
 local function show_current_repo(cx)
 	local current = cx.sessions:current()
-	set_repo(repo_from_session(current.name))
 	local identity = session_identity(current.name)
-	if identity then ensure_inventories(cx, current.id, identity.path) end
+	if identity then
+		if window_common_dir and window_common_dir ~= identity.common_dir then return end
+		window_common_dir = identity.common_dir
+		set_repo(repo_from_session(current.name))
+		initialize(cx, current, identity.path, nil)
+		ensure_inventories(cx, current.id, identity.path)
+	end
 end
 
 tern.on("window_start", show_current_repo)
@@ -286,4 +327,15 @@ end)
 
 tern.on("focus", function(_, cx)
 	show_current_repo(cx)
+end)
+
+tern.on("tab_created", function(ev, cx)
+	for _, tab in cx.session:tabs() do
+		if tab.id == ev.tab then
+			if tab.name ~= "editor" and tab.name ~= "agents" and tab.name ~= "git" then
+				show_current_repo(cx)
+			end
+			return
+		end
+	end
 end)
