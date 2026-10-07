@@ -1,4 +1,5 @@
 local PREFIX = "tern-wt:"
+local config = require("./config")
 local current_repo = nil
 local window_common_dir = nil
 local host_kind_sent = {}
@@ -88,7 +89,7 @@ local function normalize_ratios(cx, tab, nav)
 				local right = current and current.root[2]
 				return right and right.ratio or nil
 			end
-			if not set_share(cx, content[1].pane, "down", 0.65, editor_share) then return end
+		if not set_share(cx, content[1].pane, "down", config.editor_split_ratio, editor_share) then return end
 		end
 	end
 	tern.kv.set(key, true)
@@ -229,7 +230,7 @@ local function initialize(cx, session, path, starter)
 	local editor, new_editor = create_tab(cx, session.id, "editor", {
 		name = "editor", cwd = path, split = "right", ratio = 0.22,
 		[1] = { launch = inventory_launch(path, host_name, host.kind) },
-		[2] = { split = "down", ratio = 0.65,
+		[2] = { split = "down", ratio = config.editor_split_ratio,
 			[1] = { launch = { cwd = path } },
 			[2] = { launch = { cwd = path } },
 		},
@@ -240,8 +241,8 @@ local function initialize(cx, session, path, starter)
 		local tree = cx.session:layout(editor)
 		local content = tree and tree.root[2]
 		if content and content[1] and content[1].pane and content[2] and content[2].pane then
-			cx:run(content[1].pane, "nvim\r")
-			cx:run(content[2].pane, "codex\r")
+			cx:run(content[1].pane, config.editor_command .. "\r")
+			cx:run(content[2].pane, config.agent_command .. "\r")
 		else
 			cx:toast("error", "Could not start editor commands", "Editor pane layout is unavailable")
 		end
@@ -249,7 +250,7 @@ local function initialize(cx, session, path, starter)
 	local agents = create_tab(cx, session.id, "agents", {
 		name = "agents", cwd = path, split = "right", ratio = 0.22,
 		[1] = { launch = inventory_launch(path, host_name, host.kind) },
-		[2] = { split = "right", ratio = 0.5,
+		[2] = { split = "right", ratio = config.agents_split_ratio,
 			[1] = { launch = { cwd = path } },
 			[2] = { launch = { cwd = path } },
 		},
@@ -264,7 +265,7 @@ local function initialize(cx, session, path, starter)
 	if new_git then
 		local tree = cx.session:layout(git_tab)
 		if tree and tree.root[2] and tree.root[2].pane then
-			cx:run(tree.root[2].pane, "lazygit\r")
+			cx:run(tree.root[2].pane, config.git_command .. "\r")
 		else
 			cx:toast("error", "Could not start lazygit", "Git pane layout is unavailable")
 		end

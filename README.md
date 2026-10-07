@@ -58,3 +58,9 @@ Tern session intact. After a successful removal, Tern closes that worktree's
 session and its processes. If it was active, the window switches to the main
 worktree. The main worktree is not offered for removal. Git branches remain in
 place after their worktrees are removed.
+
+Edit `config.luau` to override the `nvim`, `codex`, or
+`lazygit` command, either content split ratio, or the relative setup-hook
+path. Run `tern plugin reload` afterward. These values apply when new default
+tabs are created; existing tabs keep their processes and layout. On a remote
+host, install the same plugin configuration there for matching defaults.

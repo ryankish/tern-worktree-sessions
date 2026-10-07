@@ -1,4 +1,5 @@
 local parse = require("./parse")
+local config = require("./config")
 local ui = tern.ui
 
 local function alive(pane)
@@ -117,7 +118,7 @@ end
 local function run_setup(state, cx)
 	local created = state.created
 	if not created or state.creating then return end
-	local hook = created.repo_root .. "/.tern/worktree-setup"
+	local hook = created.repo_root .. "/" .. config.setup_hook
 	if not tern.fs.exists(hook) then finish_created(state, cx); return end
 	state.creating = true
 	state.mode = "setup_running"
