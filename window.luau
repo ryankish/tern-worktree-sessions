@@ -179,6 +179,20 @@ local function named_tab(cx, session_id, name)
 	return nil
 end
 
+local function keep_git_last(cx, session_id)
+	local git_tab, count, position = nil, 0, nil
+	for _, tab in cx.session:tabs() do
+		if tab.session == session_id then
+			count += 1
+			if tab.name == "git" then
+				git_tab = tab.id
+				position = tab.position
+			end
+		end
+	end
+	if git_tab and position ~= count then cx.layout:order_tab(git_tab, count) end
+end
+
 local function create_tab(cx, session_id, name, spec)
 	local existing = named_tab(cx, session_id, name)
 	if existing then return existing, false end
@@ -254,6 +268,29 @@ local function initialize(cx, session, path, starter)
 		local layout = cx.session:layout(editor)
 		if layout then cx.layout:focus(layout.focus) end
 	end
+	keep_git_last(cx, session.id)
+end
+
+local function new_worktree_shell(cx)
+	local session = cx.sessions:current()
+	local identity = session_identity(session.name)
+	if not identity or (window_common_dir and window_common_dir ~= identity.common_dir) then
+		return false
+	end
+	local focused = cx.session:focused()
+	local pane = focused and cx.session:pane(focused)
+	if not pane or not pane.cwd or pane.cwd == "" then
+		cx:toast("error", "Cannot open worktree shell", "Focused pane has no known working directory")
+		return true
+	end
+	local opened = cx.layout:new_tab({ cwd = pane.cwd })
+	if not opened then
+		cx:toast("error", "Could not open worktree shell")
+		return true
+	end
+	keep_git_last(cx, session.id)
+	ensure_inventories(cx, session.id, identity.path)
+	return true
 end
 
 local function switch_to(cx, common_dir, path)
@@ -289,6 +326,7 @@ end
 
 tern.command({ id = "discover", title = "Worktree: Discover", icon = "branch", run = open_inventory })
 tern.command({ id = "switch", title = "Worktree: Switch", icon = "branch", run = open_inventory })
+tern.override("new_tab", new_worktree_shell)
 
 tern.route.link(function(link, cx)
 	local encoded_common, encoded_path = string.match(link.url,

@@ -28,5 +28,9 @@ custom sidebar chrome: the worktree UI is an ordinary left pane in every
 managed tab, including tabs restored from the previous plugin version. New
 sessions place it in a full-height column; existing tabs are rearranged into
 the same layout without restarting their panes. The repo name becomes the
-window title after a managed worktree session is selected. The next slice will
-intercept new shell tabs and keep `git` rightmost.
+window title after a managed worktree session is selected. In a managed
+session, `Cmd+T` opens an ordinary shell in the focused pane's current directory
+on the session's Tern host. New shell tabs go immediately before `git`; the
+plugin also moves `git` back to the right edge when a managed tab is focused.
+If Tern does not know the focused pane's directory, it shows an error instead
+of guessing a different directory.
