@@ -19,7 +19,9 @@ later clicks adopt the same session without restarting its programs. The
 
 Sessions use an exact encoding of the Git common directory and worktree path,
 so branch renames do not change their identity. Tern 0.5.3 has no plugin API for
-custom sidebar chrome: the worktree UI is an ordinary left pane and appears
-only in the tab where opened. The repo name becomes the window title after a
-managed worktree session is selected. The next slice will keep navigation
-available across worktree sessions and intercept new shell tabs.
+custom sidebar chrome: the worktree UI is an ordinary left pane in every
+managed tab, including tabs restored from the previous plugin version. New
+sessions place it in a full-height column; existing tabs gain a left split
+without restarting their panes. The repo name becomes the window title after
+a managed worktree session is selected. The next slice will intercept new shell
+tabs and keep `git` rightmost.

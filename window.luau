@@ -21,13 +21,47 @@ local function session_name(common_dir, path)
 	return PREFIX .. hex(common_dir) .. ":" .. hex(path)
 end
 
+local function session_identity(name)
+	local encoded_common, encoded_path = string.match(name,
+		"^tern%-wt:([0-9a-f]+):([0-9a-f]+)$")
+	if not encoded_common then return nil end
+	local common_dir, path = unhex(encoded_common), unhex(encoded_path)
+	if not common_dir or not path then return nil end
+	return { common_dir = common_dir, path = path }
+end
+
 local function repo_from_session(name)
-	local encoded = string.match(name, "^tern%-wt:([0-9a-f]+):[0-9a-f]+$")
-	if not encoded then return nil end
-	local common_dir = unhex(encoded)
-	if not common_dir then return nil end
+	local identity = session_identity(name)
+	if not identity then return nil end
+	local common_dir = identity.common_dir
 	local root = string.gsub(common_dir, "/%.git$", "")
 	return string.match(root, "([^/]+)$") or root
+end
+
+local function inventory_launch(path, host_name)
+	return { cwd = path, block = "worktree.inventory", args = { path, host_name } }
+end
+
+local function ensure_inventories(cx, session_id, path)
+	local host_name = cx.hosts:current().name
+	for _, tab in cx.session:tabs() do
+		if tab.session == session_id then
+			local found = false
+			for _, pane in cx.session:panes() do
+				if pane.tab == tab.id and pane.block == "worktree.inventory" then
+					found = true
+					break
+				end
+			end
+			if not found then
+				local opened = cx.layout:split(tab.pane, "left", inventory_launch(path, host_name),
+					{ focus = false })
+				if not opened then
+					cx:toast("error", "Could not show worktrees in " .. (tab.name or "tab"))
+				end
+			end
+		end
+	end
 end
 
 local function set_repo(repo)
@@ -63,31 +97,40 @@ local function open_inventory(cx)
 end
 
 local function initialize(cx, session, path)
+	local host_name = cx.hosts:current().name
 	local starter = nil
 	for _, tab in cx.session:tabs() do
 		if tab.session == session.id then starter = tab.pane; break end
 	end
 
 	local editor, editor_error = cx.layout:tab({
-		name = "editor", cwd = path, split = "down", ratio = 0.65,
-		[1] = { launch = { cwd = path, command = "nvim" } },
-		[2] = { launch = { cwd = path, command = "codex" } },
+		name = "editor", cwd = path, split = "right", ratio = 0.22,
+		[1] = { launch = inventory_launch(path, host_name) },
+		[2] = { split = "down", ratio = 0.65,
+			[1] = { launch = { cwd = path, command = "nvim" } },
+			[2] = { launch = { cwd = path, command = "codex" } },
+		},
 	})
 	if not editor then
 		cx:toast("error", "Could not create editor tab", editor_error)
 		return
 	end
 	local agents, agents_error = cx.layout:tab({
-		name = "agents", cwd = path, split = "right", ratio = 0.5,
-		[1] = { launch = { cwd = path } },
-		[2] = { launch = { cwd = path } },
+		name = "agents", cwd = path, split = "right", ratio = 0.22,
+		[1] = { launch = inventory_launch(path, host_name) },
+		[2] = { split = "right", ratio = 0.5,
+			[1] = { launch = { cwd = path } },
+			[2] = { launch = { cwd = path } },
+		},
 	})
 	if not agents then
 		cx:toast("error", "Could not create agents tab", agents_error)
 		return
 	end
 	local git_tab, git_error = cx.layout:tab({
-		name = "git", cwd = path, launch = { cwd = path, command = "lazygit" },
+		name = "git", cwd = path, split = "right", ratio = 0.22,
+		[1] = { launch = inventory_launch(path, host_name) },
+		[2] = { launch = { cwd = path, command = "lazygit" } },
 	})
 	if not git_tab then
 		cx:toast("error", "Could not create git tab", git_error)
@@ -109,6 +152,7 @@ local function switch_to(cx, common_dir, path)
 		if session.host == host.id and session.name == name then
 			cx.sessions:switch(session.id)
 			set_repo(repo_from_session(name))
+			ensure_inventories(cx, session.id, path)
 			return
 		end
 	end
@@ -136,11 +180,20 @@ tern.chrome.window_title(function()
 	return nil
 end)
 
-tern.on("window_start", function(cx)
-	set_repo(repo_from_session(cx.sessions:current().name))
+local function show_current_repo(cx)
+	local current = cx.sessions:current()
+	set_repo(repo_from_session(current.name))
+	local identity = session_identity(current.name)
+	if identity then ensure_inventories(cx, current.id, identity.path) end
+end
+
+tern.on("window_start", show_current_repo)
+
+-- window_start is not replayed when an already-open window reloads the plugin.
+tern.timer(100, function(cx)
+	if cx then show_current_repo(cx) end
 end)
 
 tern.on("focus", function(_, cx)
-	local repo = repo_from_session(cx.sessions:current().name)
-	if repo then set_repo(repo) end
+	show_current_repo(cx)
 end)
