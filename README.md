@@ -48,3 +48,13 @@ executable. It runs in the new worktree with these positional arguments:
 `TERN_WORKTREE_REPO_ROOT`, `TERN_WORKTREE_PATH`, `TERN_WORKTREE_BRANCH`,
 `TERN_WORKTREE_HOST`, and `TERN_WORKTREE_HOST_KIND`. A failed hook leaves the
 worktree in place and offers **Retry setup** or **Open workspace anyway**.
+
+To remove a secondary worktree, click **− Remove Worktree**, press `d` in the
+worktree pane, or run **Worktree: Remove**. Select its path (keys `1`–`9` also
+select the numbered entries), then confirm with the button or Enter.
+The plugin rechecks its Git identity before calling `git worktree remove`
+without force. Git errors, including dirty or locked worktrees, leave its
+Tern session intact. After a successful removal, Tern closes that worktree's
+session and its processes. If it was active, the window switches to the main
+worktree. The main worktree is not offered for removal. Git branches remain in
+place after their worktrees are removed.

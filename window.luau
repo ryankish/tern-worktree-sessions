@@ -152,7 +152,7 @@ local function set_repo(repo)
 	end
 end
 
-local function open_inventory(cx, want_new)
+local function open_inventory(cx, intent)
 	local pane = cx.session:focused()
 	local info = pane and cx.session:pane(pane)
 	local host = cx.hosts:current()
@@ -160,7 +160,7 @@ local function open_inventory(cx, want_new)
 	for _, existing in cx.session:panes() do
 		if existing.block == "worktree.inventory" and existing.tab == tab then
 			cx.layout:focus(existing.pane)
-			if want_new then cx.session:event(existing.pane, { ev = "action", act = "new" }) end
+			if intent then cx.session:event(existing.pane, { ev = "action", act = intent }) end
 			return
 		end
 	end
@@ -171,7 +171,7 @@ local function open_inventory(cx, want_new)
 	local opened = cx.layout:split(pane, "left", {
 		cwd = info.cwd,
 		block = "worktree.inventory",
-		args = { info.cwd, host.name, want_new and "new" or "", host.kind },
+		args = { info.cwd, host.name, intent or "", host.kind },
 	})
 	if not opened then
 		cx:toast("error", "Cannot open worktree panel", "Install the plugin on " .. host.name)
@@ -333,7 +333,10 @@ end
 tern.command({ id = "discover", title = "Worktree: Discover", icon = "branch", run = open_inventory })
 tern.command({ id = "switch", title = "Worktree: Switch", icon = "branch", run = open_inventory })
 tern.command({ id = "new", title = "Worktree: New", icon = "plus", run = function(cx)
-	open_inventory(cx, true)
+	open_inventory(cx, "new")
+end })
+tern.command({ id = "remove", title = "Worktree: Remove", icon = "trash", run = function(cx)
+	open_inventory(cx, "remove")
 end })
 tern.override("new_tab", new_worktree_shell)
 
@@ -358,6 +361,27 @@ local function refresh_repo_inventories(cx, common_dir)
 end
 
 tern.route.link(function(link, cx)
+	local removed_common, removed_path, anchor_path = string.match(link.url,
+		"^tern%-worktree://removed/([0-9a-f]+)/([0-9a-f]+)/([0-9a-f]+)$")
+	if removed_common then
+		local common_dir, path, anchor = unhex(removed_common), unhex(removed_path), unhex(anchor_path)
+		if not common_dir or not path or not anchor then return { handled = true } end
+		local source = link.pane and cx.session:pane(link.pane)
+		if (not source or source.block ~= "worktree.inventory")
+			and window_common_dir ~= common_dir then return { handled = true } end
+		if window_common_dir and window_common_dir ~= common_dir then return { handled = true } end
+		local current = cx.sessions:current()
+		local host_id = cx.hosts:current().id
+		for _, session in cx.sessions:list() do
+			if session.host == host_id and session.name == session_name(common_dir, path) then
+				if session.id == current.id then switch_to(cx, common_dir, anchor) end
+				cx.sessions:close(session.id)
+				break
+			end
+		end
+		refresh_repo_inventories(cx, common_dir)
+		return { handled = true }
+	end
 	local action, encoded_common, encoded_path = string.match(link.url,
 		"^tern%-worktree://([a-z]+)/([0-9a-f]+)/([0-9a-f]+)$")
 	if action ~= "switch" and action ~= "created" then return nil end

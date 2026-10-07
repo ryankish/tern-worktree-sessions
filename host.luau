@@ -34,6 +34,18 @@ local function hex(bytes)
 	end))
 end
 
+local function worktree_label(entry)
+	return entry.branch and string.gsub(entry.branch, "^refs/heads/", "")
+		or (entry.bare and "(bare)" or "(detached " .. string.sub(entry.head, 1, 8) .. ")")
+end
+
+local function remove_candidate(state, index)
+	local entry = state.entries[index]
+	-- Git lists the main worktree first. Keep it as the stable anchor for -C.
+	if not entry or index == 1 or entry.bare or entry.prunable or entry.locked then return nil end
+	return entry
+end
+
 local refresh
 
 local function process_error(result, fallback)
@@ -198,6 +210,73 @@ local function create_worktree(state, cx)
 		end)
 end
 
+local function select_removal(state, cx, index)
+	if state.creating or state.created then return end
+	local entry = remove_candidate(state, index)
+	if not entry then
+		state.error = "Choose an available secondary worktree"
+	else
+		state.remove_target = { path = entry.path, head = entry.head, branch = entry.branch }
+		state.mode = "remove_confirm"
+		state.error = nil
+	end
+	cx:render()
+end
+
+local function remove_worktree(state, cx)
+	local target = state.remove_target
+	local anchor = state.entries[1]
+	if state.creating or not target or not anchor or not state.common_dir then return end
+	state.creating = true
+	state.progress = "Checking worktree…"
+	cx:render()
+	tern.process.run({ "git", "-C", anchor.path, "worktree", "list", "--porcelain", "-z" },
+		{ timeout_ms = 10000 }, function(listed)
+			if not alive(cx.pane) then return end
+			local entries, err = nil, nil
+			if listed.status == 0 then entries, err = parse.parse_porcelain(listed.stdout) end
+			if not entries then
+				state.error = listed.status ~= 0 and process_error(listed, "Could not check worktrees") or err
+				state.creating = false
+				cx:render()
+				return
+			end
+			local current = nil
+			for index, entry in entries do
+				if index > 1 and entry.path == target.path and not entry.bare
+					and not entry.locked and not entry.prunable then current = entry; break end
+			end
+			if not current or current.head ~= target.head or current.branch ~= target.branch then
+				state.error = "Worktree changed since selection; refresh and choose it again"
+				state.creating = false
+				state.remove_target = nil
+				state.mode = "remove"
+				cx:render()
+				return
+			end
+			state.progress = "Removing worktree…"
+			cx:render()
+			tern.process.run({ "git", "-C", anchor.path, "worktree", "remove", "--", target.path },
+				{ timeout_ms = 600000 }, function(result)
+					if not alive(cx.pane) then return end
+					state.creating = false
+					if result.status ~= 0 then
+						state.error = process_error(result, "git worktree remove failed")
+						cx:render()
+						return
+					end
+					state.remove_target = nil
+					state.mode = "list"
+					state.error = nil
+					state.cwd = anchor.path
+					cx:save()
+					cx:open("tern-worktree://removed/" .. hex(state.common_dir) .. "/"
+						.. hex(target.path) .. "/" .. hex(anchor.path))
+					refresh(state, cx)
+				end)
+		end)
+end
+
 refresh = function(state, cx)
 	state.generation += 1
 	local generation = state.generation
@@ -262,7 +341,7 @@ tern.block.define("inventory", {
 			error = nil,
 			generation = 0,
 			mode = saved and saved.pending and "setup_failed"
-				or (args[3] == "new" and "new" or "list"),
+				or ((args[3] == "new" or args[3] == "remove") and args[3] or "list"),
 			host_kind = (saved and saved.host_kind) or args[4] or "unknown",
 			branch = "",
 			creating = false,
@@ -270,6 +349,7 @@ tern.block.define("inventory", {
 			pending_branch = nil,
 			created = saved and saved.pending or nil,
 			setup_error = saved and saved.setup_error or nil,
+			remove_target = nil,
 		}
 		if state.created and not state.setup_error then
 			state.setup_error = "Setup status is unknown after restart; retry or open anyway"
@@ -325,11 +405,41 @@ tern.block.define("inventory", {
 				end
 			end
 		end
+		if state.mode == "remove" then
+			table.insert(rows, ui.text({ ui.span("REMOVE WORKTREE", "strong") }))
+			table.insert(rows, ui.text({ ui.span("Select a secondary worktree", "muted") }))
+			for index, entry in state.entries do
+				if remove_candidate(state, index) then
+					table.insert(rows, ui.node("item", {
+						key = "remove-" .. tostring(index),
+						label = tostring(index - 1) .. ". " .. worktree_label(entry),
+						detail = entry.path, actions = { click = "remove_select=" .. tostring(index) },
+					}))
+				end
+			end
+			table.insert(rows, ui.node("item", {
+				key = "cancel-remove", label = "Cancel", actions = { click = "cancel_remove" },
+			}))
+		elseif state.mode == "remove_confirm" and state.remove_target then
+			table.insert(rows, ui.text({ ui.span("REMOVE WORKTREE?", "strong") }))
+			table.insert(rows, ui.text(state.remove_target.path))
+			table.insert(rows, ui.text({ ui.span("Its Tern session and running processes will close after Git removes it.", "warning") }))
+			if state.creating then
+				table.insert(rows, ui.text({ ui.span(state.progress, "muted") }))
+			else
+				table.insert(rows, ui.node("item", {
+					key = "confirm-remove", label = "Remove worktree", icon = "trash",
+					actions = { click = "confirm_remove" },
+				}))
+				table.insert(rows, ui.node("item", {
+					key = "cancel-remove", label = "Cancel", actions = { click = "cancel_remove" },
+				}))
+			end
+		end
 		local active = active_worktree(state)
 		local items = {}
 		for index, entry in state.entries do
-			local label = entry.branch and string.gsub(entry.branch, "^refs/heads/", "")
-				or (entry.bare and "(bare)" or "(detached " .. string.sub(entry.head, 1, 8) .. ")")
+			local label = worktree_label(entry)
 			local value = entry.prunable and "prunable" or (entry.locked and "locked" or nil)
 			table.insert(items, ui.node("item", {
 				key = tostring(#items + 1),
@@ -338,7 +448,8 @@ tern.block.define("inventory", {
 				value = value,
 				icon = "branch",
 				tone = entry == active and "accent" or (entry.prunable and "warning" or nil),
-				disabled = state.error ~= nil or entry.prunable or entry.bare,
+				disabled = state.mode == "remove" or state.mode == "remove_confirm"
+					or state.error ~= nil or entry.prunable or entry.bare,
 				actions = { click = "switch=" .. tostring(index) },
 			}))
 		end
@@ -346,15 +457,22 @@ tern.block.define("inventory", {
 		table.insert(rows, ui.rule(""))
 		table.insert(rows, ui.node("item", {
 			key = "new", label = "+ New Worktree", icon = "plus",
-			disabled = state.creating or state.created ~= nil,
+			disabled = state.mode ~= "list" or state.creating or state.created ~= nil,
 			actions = { click = "new" },
+		}))
+		table.insert(rows, ui.node("item", {
+			key = "remove", label = "− Remove Worktree", icon = "trash",
+			disabled = state.mode ~= "list" or state.creating or state.created ~= nil,
+			actions = { click = "remove" },
 		}))
 		table.insert(rows, ui.node("item", {
 			key = "refresh", label = "↻ Refresh", icon = "refresh",
 			actions = { click = "refresh" },
 		}))
 		local hint = state.mode == "setup_failed" and "s: retry setup · c: open anyway"
-			or "n: new · r: refresh"
+			or (state.mode == "remove" and "1–9: select · Esc: cancel")
+			or (state.mode == "remove_confirm" and "Enter: remove · Esc: cancel")
+			or "n: new · d: remove · r: refresh"
 		return { main = ui.col(rows), dock = ui.col({ ui.text({ ui.span(hint, "muted") }) }) }
 	end,
 	key = function(state, key, cx)
@@ -384,7 +502,31 @@ tern.block.define("inventory", {
 			end
 			return true
 		end
-		if key.name == "n" then begin_new(state, cx); return true end
+		if key.name == "escape" and (state.mode == "remove" or state.mode == "remove_confirm") then
+			if state.creating then return false end
+			state.mode = "list"
+			state.remove_target = nil
+			state.error = nil
+			return true
+		end
+		if state.mode == "remove" then
+			local number = tonumber(key.name)
+			if number and number >= 1 and number <= 9 then
+				select_removal(state, cx, number + 1)
+				return true
+			end
+		end
+		if state.mode == "remove_confirm" and key.name == "enter" then
+			remove_worktree(state, cx)
+			return true
+		end
+		if key.name == "n" and state.mode == "list" then begin_new(state, cx); return true end
+		if key.name == "d" and state.mode == "list" and not state.creating and not state.created then
+			state.mode = "remove"
+			state.remove_target = nil
+			state.error = nil
+			return true
+		end
 		if key.name ~= "r" then return false end
 		refresh(state, cx)
 		return true
@@ -403,7 +545,25 @@ tern.block.define("inventory", {
 				cx:save()
 			end
 		elseif ev.act == "new" then
-			if not state.creating then begin_new(state, cx) end
+			if state.mode == "list" and not state.creating then begin_new(state, cx) end
+		elseif ev.act == "remove" then
+			if state.mode == "list" and not state.creating and not state.created then
+				state.mode = "remove"
+				state.remove_target = nil
+				state.error = nil
+				cx:render()
+			end
+		elseif ev.act == "remove_select" then
+			if state.mode == "remove" then select_removal(state, cx, tonumber(ev.value)) end
+		elseif ev.act == "confirm_remove" then
+			if state.mode == "remove_confirm" then remove_worktree(state, cx) end
+		elseif ev.act == "cancel_remove" then
+			if not state.creating then
+				state.mode = "list"
+				state.remove_target = nil
+				state.error = nil
+				cx:render()
+			end
 		elseif ev.act == "cancel" then
 			if not state.creating then
 				state.mode = "list"
@@ -419,7 +579,8 @@ tern.block.define("inventory", {
 		elseif ev.act == "switch" then
 			local index = tonumber(ev.value)
 			local entry = index and state.entries[index]
-			if entry and not state.error and not entry.prunable and not entry.bare and state.common_dir then
+			if entry and state.mode ~= "remove" and state.mode ~= "remove_confirm"
+				and not state.error and not entry.prunable and not entry.bare and state.common_dir then
 				cx:open("tern-worktree://switch/" .. hex(state.common_dir) .. "/" .. hex(entry.path))
 			end
 		end
