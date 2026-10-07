@@ -28,6 +28,12 @@ local function project_name(state)
 	return string.match(path, "([^/]+)/?$") or path
 end
 
+local function hex(bytes)
+	return (string.gsub(bytes, ".", function(byte)
+		return string.format("%02x", string.byte(byte))
+	end))
+end
+
 local function refresh(state, cx)
 	state.generation += 1
 	local generation = state.generation
@@ -84,7 +90,7 @@ tern.block.define("inventory", {
 		if state.loading then table.insert(rows, ui.text({ ui.span("Refreshing…", "muted") })) end
 		local active = active_worktree(state)
 		local items = {}
-		for _, entry in state.entries do
+		for index, entry in state.entries do
 			local label = entry.branch and string.gsub(entry.branch, "^refs/heads/", "")
 				or (entry.bare and "(bare)" or "(detached " .. string.sub(entry.head, 1, 8) .. ")")
 			local value = entry.prunable and "prunable" or (entry.locked and "locked" or nil)
@@ -95,6 +101,8 @@ tern.block.define("inventory", {
 				value = value,
 				icon = "branch",
 				tone = entry == active and "accent" or (entry.prunable and "warning" or nil),
+				disabled = entry.prunable or entry.bare,
+				actions = { click = "switch=" .. tostring(index) },
 			}))
 		end
 		table.insert(rows, ui.section("WORKTREES", items))
@@ -111,7 +119,16 @@ tern.block.define("inventory", {
 		return true
 	end,
 	event = function(state, ev, cx)
-		if ev.ev == "action" and ev.act == "refresh" then refresh(state, cx) end
+		if ev.ev ~= "action" then return end
+		if ev.act == "refresh" then
+			refresh(state, cx)
+		elseif ev.act == "switch" then
+			local index = tonumber(ev.value)
+			local entry = index and state.entries[index]
+			if entry and not entry.prunable and not entry.bare and state.common_dir then
+				cx:open("tern-worktree://switch/" .. hex(state.common_dir) .. "/" .. hex(entry.path))
+			end
+		end
 	end,
 	save = function(state)
 		return { cwd = state.cwd, host = state.host, common_dir = state.common_dir,
