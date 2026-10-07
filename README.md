@@ -58,12 +58,12 @@ choice IDs; Tern does not interpret their meanings. For example:
   "version": 1,
   "questions": [
     {
-      "id": "config",
-      "label": "Create a local config?",
-      "default": "generate",
+      "id": "environment",
+      "label": "How should this worktree use its environment?",
+      "default": "independent",
       "choices": [
-        { "id": "generate", "label": "Generate config" },
-        { "id": "none", "label": "No config" }
+        { "id": "independent", "label": "Independent environment" },
+        { "id": "shared", "label": "Share the primary environment" }
       ]
     }
   ]
