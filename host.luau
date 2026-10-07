@@ -1,5 +1,6 @@
 local parse = require("./parse")
 local config = require("./config")
+local setup_policy = require("./setup_policy")
 local ui = tern.ui
 
 local function alive(pane)
@@ -87,6 +88,9 @@ local function begin_new(state, cx)
 	if state.created or state.creating then return end
 	state.mode = "new"
 	state.branch = ""
+	state.setup_questions = nil
+	state.setup_answers = nil
+	state.setup_selected = false
 	if state.ready then state.error = nil end
 	cx:render()
 	cx:frame({ { "focus", "main.branch" } })
@@ -95,12 +99,19 @@ end
 local function finish_created(state, cx)
 	local created = state.created
 	if not created then return end
+	tern.kv.set("setup:" .. hex(state.common_dir) .. ":" .. hex(created.path), {
+		choices = created.setup_answers or {}, policy_root = created.repo_root,
+		completed = state.setup_error == nil,
+	})
 	state.created = nil
 	state.creating = false
 	state.mode = "list"
 	state.branch = ""
 	state.error = nil
 	state.setup_error = nil
+	state.setup_questions = nil
+	state.setup_answers = nil
+	state.setup_selected = false
 	cx:save()
 	refresh(state, cx)
 	cx:open("tern-worktree://created/" .. hex(state.common_dir) .. "/" .. hex(created.path))
@@ -119,7 +130,14 @@ local function run_setup(state, cx)
 	local created = state.created
 	if not created or state.creating then return end
 	local hook = created.repo_root .. "/" .. config.setup_hook
-	if not tern.fs.exists(hook) then finish_created(state, cx); return end
+	if not tern.fs.exists(hook) then
+		if created.has_policy then
+			setup_failed(state, cx, "Configured setup hook is missing: " .. hook)
+		else
+			finish_created(state, cx)
+		end
+		return
+	end
 	state.creating = true
 	state.mode = "setup_running"
 	state.setup_error = nil
@@ -134,6 +152,8 @@ local function run_setup(state, cx)
 				TERN_WORKTREE_BRANCH = created.branch,
 				TERN_WORKTREE_HOST = state.host,
 				TERN_WORKTREE_HOST_KIND = state.host_kind,
+				TERN_WORKTREE_SETUP_CHOICES_JSON = created.has_policy
+					and tern.json.encode(created.setup_answers) or "{}",
 			},
 			timeout_ms = 900000,
 		}, function(result)
@@ -167,6 +187,36 @@ local function create_worktree(state, cx)
 	end
 	local path, path_error, repo_root = new_path(state, branch)
 	if not path then state.error = path_error; cx:render(); return end
+	if not state.setup_selected then
+		local policy_path = repo_root .. "/" .. config.setup_hook .. ".json"
+		if tern.fs.exists(policy_path) then
+			local ok, bytes = pcall(tern.fs.read, policy_path, 65536)
+			if not ok then state.error = "Cannot read setup policy: " .. tostring(bytes); cx:render(); return end
+			local questions, err = setup_policy.parse(bytes)
+			if not questions then state.error = err; cx:render(); return end
+			if not tern.fs.exists(repo_root .. "/" .. config.setup_hook) then
+				state.error = "Setup policy exists, but its hook is missing"
+				cx:render()
+				return
+			end
+			state.setup_questions = questions
+			state.setup_answers = {}
+			state.setup_index = 1
+			state.has_policy = true
+			if #questions > 0 then
+				state.mode = "setup_choices"
+				state.error = nil
+				cx:frame({ { "focus", tern.json.null } })
+				cx:render()
+				return
+			end
+		else
+			state.setup_questions = nil
+			state.setup_answers = {}
+			state.has_policy = false
+		end
+		state.setup_selected = true
+	end
 	state.creating = true
 	state.error = nil
 	state.progress = "Checking branch…"
@@ -203,12 +253,29 @@ local function create_worktree(state, cx)
 							cx:render()
 							return
 						end
-						state.created = { path = path, branch = branch, repo_root = repo_root }
+						state.created = { path = path, branch = branch, repo_root = repo_root,
+							setup_answers = state.setup_answers, has_policy = state.has_policy }
 						cx:save()
 						run_setup(state, cx)
 					end)
 				end)
 		end)
+end
+
+local function select_setup_choice(state, cx, index)
+	if state.mode ~= "setup_choices" or state.creating then return end
+	local question = state.setup_questions and state.setup_questions[state.setup_index]
+	local choice = question and question.choices[index]
+	if not choice then return end
+	state.setup_answers[question.id] = choice.id
+	if state.setup_index < #state.setup_questions then
+		state.setup_index += 1
+		cx:render()
+		return
+	end
+	state.setup_selected = true
+	state.mode = "new"
+	create_worktree(state, cx)
 end
 
 local function select_removal(state, cx, index)
@@ -266,6 +333,7 @@ local function remove_worktree(state, cx)
 						cx:render()
 						return
 					end
+					tern.kv.set("setup:" .. hex(state.common_dir) .. ":" .. hex(target.path), nil)
 					state.remove_target = nil
 					state.mode = "list"
 					state.error = nil
@@ -350,6 +418,11 @@ tern.block.define("inventory", {
 			pending_branch = nil,
 			created = saved and saved.pending or nil,
 			setup_error = saved and saved.setup_error or nil,
+			setup_questions = nil,
+			setup_answers = nil,
+			setup_index = 1,
+			setup_selected = false,
+			has_policy = false,
 			remove_target = nil,
 		}
 		if state.created and not state.setup_error then
@@ -386,6 +459,25 @@ tern.block.define("inventory", {
 			end
 			table.insert(rows, ui.node("item", {
 				key = "cancel", label = "Cancel", actions = { click = "cancel" },
+			}))
+		end
+		if state.mode == "setup_choices" then
+			local question = state.setup_questions[state.setup_index]
+			table.insert(rows, ui.text({ ui.span("SETUP CHOICES", "strong") }))
+			table.insert(rows, ui.text({ ui.span(state.branch, "muted") }))
+			table.insert(rows, ui.text(question.label))
+			if question.description then table.insert(rows, ui.text({ ui.span(question.description, "muted") })) end
+			for index, choice in question.choices do
+				table.insert(rows, ui.node("item", {
+					key = "setup-choice-" .. tostring(index),
+					label = tostring(index) .. ". " .. choice.label,
+					detail = choice.description,
+					value = choice.id == question.default and "default" or nil,
+					actions = { click = "setup_choice=" .. tostring(index) },
+				}))
+			end
+			table.insert(rows, ui.node("item", {
+				key = "setup-back", label = "Back to branch", actions = { click = "setup_back" },
 			}))
 		end
 		if state.mode == "setup_running" or state.mode == "setup_failed" then
@@ -471,6 +563,7 @@ tern.block.define("inventory", {
 			actions = { click = "refresh" },
 		}))
 		local hint = state.mode == "setup_failed" and "s: retry setup · c: open anyway"
+			or (state.mode == "setup_choices" and "1–9: select · Enter: default · Esc: back")
 			or (state.mode == "remove" and "1–9: select · Esc: cancel")
 			or (state.mode == "remove_confirm" and "Enter: remove · Esc: cancel")
 			or "n: new · d: remove · r: refresh"
@@ -502,6 +595,26 @@ tern.block.define("inventory", {
 				return false
 			end
 			return true
+		end
+		if state.mode == "setup_choices" then
+			if key.name == "escape" then
+				state.mode = "new"
+				state.setup_selected = false
+				cx:frame({ { "focus", "main.branch" } })
+				return true
+			end
+			local question = state.setup_questions[state.setup_index]
+			if key.name == "enter" then
+				for index, choice in question.choices do
+					if choice.id == question.default then select_setup_choice(state, cx, index); break end
+				end
+				return true
+			end
+			local number = tonumber(key.name)
+			if number and number >= 1 and number <= 9 then
+				select_setup_choice(state, cx, number)
+				return true
+			end
 		end
 		if key.name == "escape" and (state.mode == "remove" or state.mode == "remove_confirm") then
 			if state.creating then return false end
@@ -547,6 +660,14 @@ tern.block.define("inventory", {
 			end
 		elseif ev.act == "new" then
 			if state.mode == "list" and not state.creating then begin_new(state, cx) end
+		elseif ev.act == "setup_choice" then
+			select_setup_choice(state, cx, tonumber(ev.value))
+		elseif ev.act == "setup_back" then
+			if state.mode == "setup_choices" then
+				state.mode = "new"
+				state.setup_selected = false
+				cx:frame({ { "focus", "main.branch" } })
+			end
 		elseif ev.act == "remove" then
 			if state.mode == "list" and not state.creating and not state.created then
 				state.mode = "remove"

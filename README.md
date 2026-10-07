@@ -49,6 +49,34 @@ executable. It runs in the new worktree with these positional arguments:
 `TERN_WORKTREE_HOST`, and `TERN_WORKTREE_HOST_KIND`. A failed hook leaves the
 worktree in place and offers **Retry setup** or **Open workspace anyway**.
 
+For setup choices, add `.tern/worktree-setup.json` beside the hook in the
+repository's primary checkout. The JSON contains only questions and opaque
+choice IDs; Tern does not interpret their meanings. For example:
+
+```json
+{
+  "version": 1,
+  "questions": [
+    {
+      "id": "config",
+      "label": "Create a local config?",
+      "default": "generate",
+      "choices": [
+        { "id": "generate", "label": "Generate config" },
+        { "id": "none", "label": "No config" }
+      ]
+    }
+  ]
+}
+```
+
+Tern asks these questions after the branch name and before `git worktree add`.
+Each question and choice may also have a `description`. It passes the answers
+to the hook as a JSON object in `TERN_WORKTREE_SETUP_CHOICES_JSON`, and saves
+them with the worktree identity after setup succeeds. The hook stays in charge
+of all project-specific actions. The policy and hook run on the Tern host; the
+new worktree does not need its own copy of either file.
+
 To remove a secondary worktree, click **− Remove Worktree**, press `d` in the
 worktree pane, or run **Worktree: Remove**. Select its path (keys `1`–`9` also
 select the numbered entries), then confirm with the button or Enter.
