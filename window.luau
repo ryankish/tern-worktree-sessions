@@ -4,6 +4,12 @@ local current_repo = nil
 local window_common_dir = nil
 local host_kind_sent = {}
 local initialized_shells = {}
+local AUTO_REFRESH_MS = 30000
+local AUTO_POLL_MS = 5000
+local last_refresh_at = -AUTO_REFRESH_MS
+local last_visible_session = nil
+local last_host_id = nil
+local last_host_state = nil
 
 local function hex(bytes)
 	return (string.gsub(bytes, ".", function(byte)
@@ -382,15 +388,17 @@ tern.command({ id = "run_setup", title = "Worktree: Run Setup", icon = "play", r
 end })
 tern.override("new_tab", new_worktree_shell)
 
-local function refresh_repo_inventories(cx, common_dir, source_pane)
+local function refresh_repo_inventories(cx, common_dir, source_pane, visible_session)
 	local host_id = cx.hosts:current().id
 	local sessions = {}
 	local paths = {}
 	for _, session in cx.sessions:list() do
 		local identity = session_identity(session.name)
 		if session.host == host_id and identity and identity.common_dir == common_dir then
-			sessions[session.id] = true
 			table.insert(paths, identity.path)
+			if not visible_session or session.id == visible_session then
+				sessions[session.id] = true
+			end
 		end
 	end
 	local tabs = {}
@@ -412,6 +420,24 @@ local function refresh_repo_inventories(cx, common_dir, source_pane)
 			cx.session:event(source_pane, { ev = "action", act = "refresh" })
 		end
 	end
+	last_refresh_at = tern.now()
+	last_visible_session = cx.sessions:current().id
+end
+
+local function maybe_auto_refresh(cx)
+	local current = cx.sessions:current()
+	local identity = session_identity(current.name)
+	if not identity or (window_common_dir and window_common_dir ~= identity.common_dir) then return end
+	local host = cx.hosts:current()
+	local reconnected = host.id ~= last_host_id or last_host_state ~= "connected"
+	last_host_id = host.id
+	last_host_state = host.state
+	if host.state ~= "connected" then return end
+	local now = tern.now()
+	if not reconnected and last_visible_session == current.id
+		and now - last_refresh_at < AUTO_REFRESH_MS then return end
+	refresh_repo_inventories(cx, identity.common_dir, nil, current.id)
+	last_visible_session = current.id
 end
 
 tern.route.link(function(link, cx)
@@ -486,16 +512,31 @@ local function show_current_repo(cx)
 	end
 end
 
-tern.on("window_start", show_current_repo)
+tern.on("window_start", function(cx)
+	show_current_repo(cx)
+	maybe_auto_refresh(cx)
+end)
 
 -- window_start is not replayed when an already-open window reloads the plugin.
 tern.timer(100, function(cx)
-	if cx then show_current_repo(cx) end
+	if cx then
+		show_current_repo(cx)
+		maybe_auto_refresh(cx)
+	end
 end)
 
 tern.on("focus", function(_, cx)
 	show_current_repo(cx)
+	maybe_auto_refresh(cx)
 end)
+
+-- Tern has no OS-window-activation or host-reconnected event. The lightweight
+-- poll notices both a reconnect and Git changes while a pane stays focused.
+local function auto_poll(cx)
+	if cx then maybe_auto_refresh(cx) end
+	tern.timer(AUTO_POLL_MS, auto_poll)
+end
+tern.timer(AUTO_POLL_MS, auto_poll)
 
 -- A normal Tern pane split also starts a shell. Only the initiating window
 -- focuses its new pane, so this avoids sourcing twice in shared sessions.
