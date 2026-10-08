@@ -4,6 +4,7 @@ local current_repo = nil
 local window_common_dir = nil
 local host_kind_sent = {}
 local initialized_shells = {}
+local initialized_sessions = {}
 local AUTO_REFRESH_MS = 30000
 local AUTO_POLL_MS = 5000
 local last_refresh_at = -AUTO_REFRESH_MS
@@ -321,6 +322,48 @@ local function initialize(cx, session, path, starter)
 	keep_git_last(cx, session.id)
 end
 
+local function ensure_initialized(cx, session, path, starter)
+	if initialized_sessions[session.id] then return end
+	initialize(cx, session, path, starter)
+	if named_tab(cx, session.id, "editor") and named_tab(cx, session.id, "agents")
+		and named_tab(cx, session.id, "git") then
+		initialized_sessions[session.id] = true
+	end
+end
+
+local function open_managed_tab(cx, name)
+	local session = cx.sessions:current()
+	local identity = session_identity(session.name)
+	if not identity or (window_common_dir and window_common_dir ~= identity.common_dir) then
+		cx:toast("error", "Select a worktree before opening its " .. name .. " tab")
+		return
+	end
+	if cx.hosts:current().state ~= "connected" then
+		cx:toast("error", "Worktree host is disconnected")
+		return
+	end
+	local existed = named_tab(cx, session.id, name) ~= nil
+	if not existed then
+		-- An explicit Open repairs a manually closed default tab.
+		initialized_sessions[session.id] = nil
+		ensure_initialized(cx, session, identity.path, nil)
+	end
+	local tab = named_tab(cx, session.id, name)
+	if not tab then return end
+	ensure_inventories(cx, session.id, identity.path)
+	local layout = cx.session:layout(tab)
+	local pane = layout and layout.focus
+	if not existed then
+		for _, item in cx.session:panes() do
+			if item.tab == tab and item.block ~= "worktree.inventory" then
+				pane = item.pane
+				break
+			end
+		end
+	end
+	if pane then cx.layout:focus(pane) end
+end
+
 local function new_worktree_shell(cx)
 	local session = cx.sessions:current()
 	local identity = session_identity(session.name)
@@ -361,7 +404,7 @@ local function switch_to(cx, common_dir, path)
 		if session.host == host.id and session.name == name then
 			cx.sessions:switch(session.id)
 			set_repo(repo_from_session(name))
-			initialize(cx, session, path, nil)
+			ensure_initialized(cx, session, path, nil)
 			ensure_inventories(cx, session.id, path)
 			return
 		end
@@ -372,7 +415,7 @@ local function switch_to(cx, common_dir, path)
 		if tab.session == session.id then starter = tab.pane; break end
 	end
 	set_repo(repo_from_session(name))
-	initialize(cx, session, path, starter)
+	ensure_initialized(cx, session, path, starter)
 end
 
 tern.command({ id = "discover", title = "Worktree: Discover", icon = "branch", run = open_inventory })
@@ -386,6 +429,12 @@ end })
 tern.command({ id = "run_setup", title = "Worktree: Run Setup", icon = "play", run = function(cx)
 	open_inventory(cx, "setup")
 end })
+tern.command({ id = "open_editor", title = "Worktree: Open Editor Tab", icon = "file",
+	run = function(cx) open_managed_tab(cx, "editor") end })
+tern.command({ id = "open_agents", title = "Worktree: Open Agents Tab", icon = "terminal",
+	run = function(cx) open_managed_tab(cx, "agents") end })
+tern.command({ id = "open_git", title = "Worktree: Open Git Tab", icon = "branch",
+	run = function(cx) open_managed_tab(cx, "git") end })
 tern.override("new_tab", new_worktree_shell)
 
 local function refresh_repo_inventories(cx, common_dir, source_pane, visible_session)
@@ -423,6 +472,21 @@ local function refresh_repo_inventories(cx, common_dir, source_pane, visible_ses
 	last_refresh_at = tern.now()
 	last_visible_session = cx.sessions:current().id
 end
+
+tern.command({ id = "refresh", title = "Worktree: Refresh", icon = "refresh", run = function(cx)
+	local current = cx.sessions:current()
+	local identity = session_identity(current.name)
+	if identity and (not window_common_dir or window_common_dir == identity.common_dir) then
+		if cx.hosts:current().state ~= "connected" then
+			cx:toast("error", "Worktree host is disconnected")
+			return
+		end
+		ensure_inventories(cx, current.id, identity.path)
+		refresh_repo_inventories(cx, identity.common_dir)
+	else
+		open_inventory(cx, "refresh_all")
+	end
+end })
 
 local function maybe_auto_refresh(cx)
 	local current = cx.sessions:current()
@@ -473,6 +537,7 @@ tern.route.link(function(link, cx)
 			if session.host == host_id and session.name == session_name(common_dir, path) then
 				if session.id == current.id then switch_to(cx, common_dir, anchor) end
 				cx.sessions:close(session.id)
+				initialized_sessions[session.id] = nil
 				break
 			end
 		end
@@ -507,7 +572,7 @@ local function show_current_repo(cx)
 		if window_common_dir and window_common_dir ~= identity.common_dir then return end
 		window_common_dir = identity.common_dir
 		set_repo(repo_from_session(current.name))
-		initialize(cx, current, identity.path, nil)
+		ensure_initialized(cx, current, identity.path, nil)
 		ensure_inventories(cx, current.id, identity.path)
 	end
 end
@@ -533,7 +598,11 @@ end)
 -- Tern has no OS-window-activation or host-reconnected event. The lightweight
 -- poll notices both a reconnect and Git changes while a pane stays focused.
 local function auto_poll(cx)
-	if cx then maybe_auto_refresh(cx) end
+	if cx then
+		local current = cx.sessions:current()
+		if not initialized_sessions[current.id] then show_current_repo(cx) end
+		maybe_auto_refresh(cx)
+	end
 	tern.timer(AUTO_POLL_MS, auto_poll)
 end
 tern.timer(AUTO_POLL_MS, auto_poll)
