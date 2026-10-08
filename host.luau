@@ -597,13 +597,16 @@ tern.block.define("inventory", {
 				if state.creating then
 					table.insert(rows, ui.text({ ui.span(state.progress or "Running setup…", "muted") }))
 				else
-					table.insert(rows, ui.node("item", {
-						key = "retry", label = "Retry setup", actions = { click = "retry_setup" },
-					}))
-					table.insert(rows, ui.node("item", {
-						key = "continue", label = created.existing and "Dismiss setup failure"
-							or "Open workspace anyway",
-						actions = { click = "continue_setup" },
+					table.insert(rows, ui.el("div", { class = "wt-setup-actions" }, {
+						ui.el("button", {
+							key = "retry", class = "wt-setup-button primary", text = "Retry setup",
+							actions = { click = "retry_setup" },
+						}),
+						ui.el("button", {
+							key = "continue", class = "wt-setup-button secondary",
+							text = created.existing and "Dismiss setup failure" or "Open workspace anyway",
+							actions = { click = "continue_setup" },
+						}),
 					}))
 				end
 			end

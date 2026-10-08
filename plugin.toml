@@ -1,11 +1,12 @@
 schema = 1
 id = "worktree"
 name = "Worktree Workspace"
-version = "0.6.1"
+version = "0.6.2"
 description = "Git worktree navigation and persistent workspace sessions."
 icon = "git-branch"
 host = "host.luau"
 window = "window.luau"
+styles = ["styles.css"]
 
 [[blocks]]
 id = "inventory"
