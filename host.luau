@@ -547,6 +547,14 @@ refresh = function(state, cx)
 						if waiting then state.creating = false end
 						cx:render()
 					end
+					if state.auto_enter and state.ready and state.mode == "list" then
+						state.auto_enter = false
+						local entry = active_worktree(state)
+						if entry and not entry.bare and not entry.prunable
+							and tern.fs.exists(entry.path) then
+							cx:open("tern-worktree://switch/" .. hex(state.common_dir) .. "/" .. hex(entry.path))
+						end
+					end
 					cx:save()
 				end)
 		end)
@@ -593,6 +601,7 @@ tern.block.define("inventory", {
 			remove_target = nil,
 			stale_target = nil,
 			managed_paths = {},
+			auto_enter = not saved and args[3] == "discover",
 		}
 		if state.created and not state.setup_error then
 			state.setup_error = "Setup status is unknown after restart; retry or open anyway"
@@ -910,6 +919,12 @@ tern.block.define("inventory", {
 		if ev.ev ~= "action" then return end
 		if ev.act == "refresh" then
 			refresh(state, cx)
+		elseif ev.act == "discover" then
+			if state.mode == "list" and not state.creating and not state.created then
+				if type(ev.cwd) == "string" and ev.cwd ~= "" then state.cwd = ev.cwd end
+				state.auto_enter = true
+				refresh(state, cx)
+			end
 		elseif ev.act == "managed_paths" then
 			if type(ev.value) == "table" then
 				state.managed_paths = ev.value

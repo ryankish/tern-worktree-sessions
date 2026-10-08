@@ -193,11 +193,15 @@ local function open_inventory(cx, intent)
 	local pane = cx.session:focused()
 	local info = pane and cx.session:pane(pane)
 	local host = cx.hosts:current()
+	if intent == "discover" and session_identity(cx.sessions:current().name) then intent = nil end
 	local tab = pane and cx.session:tab_of(pane)
 	for _, existing in cx.session:panes() do
 		if existing.block == "worktree.inventory" and existing.tab == tab then
 			cx.layout:focus(existing.pane)
-			if intent then cx.session:event(existing.pane, { ev = "action", act = intent }) end
+			if intent then
+				cx.session:event(existing.pane, { ev = "action", act = intent,
+					cwd = info and info.cwd or nil })
+			end
 			return
 		end
 	end
@@ -464,7 +468,9 @@ local function switch_to(cx, common_dir, path)
 	ensure_initialized(cx, session, path, starter)
 end
 
-tern.command({ id = "discover", title = "Worktree: Discover", icon = "branch", run = open_inventory })
+tern.command({ id = "discover", title = "Worktree: Discover", icon = "branch", run = function(cx)
+	open_inventory(cx, "discover")
+end })
 tern.command({ id = "switch", title = "Worktree: Switch", icon = "branch", run = open_inventory })
 tern.command({ id = "new", title = "Worktree: New", icon = "plus", run = function(cx)
 	open_inventory(cx, "new")
