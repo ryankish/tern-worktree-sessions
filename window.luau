@@ -584,14 +584,36 @@ tern.route.link(function(link, cx)
 			and window_common_dir ~= common_dir then return { handled = true } end
 		if window_common_dir and window_common_dir ~= common_dir then return { handled = true } end
 		local current = cx.sessions:current()
-		local host_id = cx.hosts:current().id
-		for _, session in cx.sessions:list() do
-			if session.host == host_id and session.name == session_name(common_dir, path) then
-				if session.id == current.id then switch_to(cx, common_dir, anchor) end
-				cx.sessions:close(session.id)
-				initialized_sessions[session.id] = nil
-				break
+		local source_host = nil
+		local source_tab = link.pane and cx.session:tab_of(link.pane)
+		if source_tab then
+			for _, tab in cx.session:tabs() do
+				if tab.id == source_tab then
+					for _, session in cx.sessions:list() do
+						if session.id == tab.session then source_host = session.host; break end
+					end
+					break
+				end
 			end
+		end
+		local matches = {}
+		for _, session in cx.sessions:list() do
+			if session.name == session_name(common_dir, path)
+				and (not source_host or session.host == source_host) then
+				table.insert(matches, session)
+			end
+		end
+		if #matches == 1 then
+			local session = matches[1]
+			if session.id == current.id then switch_to(cx, common_dir, anchor) end
+			cx.sessions:close(session.id)
+			initialized_sessions[session.id] = nil
+		elseif #matches > 1 then
+			cx:toast("error", "Worktree removed but sessions remain",
+				"More than one host has a matching session; close the unavailable sessions explicitly")
+		elseif not stale_cleanup then
+			cx:toast("error", "Worktree removed but session remains",
+				"Tern could not find its session in this window")
 		end
 		refresh_repo_inventories(cx, common_dir)
 		if stale_cleanup then cx:toast("success", "Closed unavailable worktree session", path) end

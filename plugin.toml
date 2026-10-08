@@ -1,7 +1,7 @@
 schema = 1
 id = "worktree"
 name = "Worktree Workspace"
-version = "0.6.8"
+version = "0.6.9"
 description = "Git worktree navigation and persistent workspace sessions."
 icon = "git-branch"
 host = "host.luau"
