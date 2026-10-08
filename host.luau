@@ -41,6 +41,18 @@ local function worktree_label(entry)
 		or (entry.bare and "(bare)" or "(detached " .. string.sub(entry.head, 1, 8) .. ")")
 end
 
+local function has_setup_hook(entry)
+	return not entry.bare and not entry.prunable
+		and tern.fs.exists(entry.path .. "/" .. config.setup_hook)
+end
+
+local function any_setup_hook(entries)
+	for _, entry in entries do
+		if has_setup_hook(entry) then return true end
+	end
+	return false
+end
+
 local function remove_candidate(state, index)
 	local entry = state.entries[index]
 	-- Git lists the main worktree first. Keep it as the stable anchor for -C.
@@ -286,7 +298,7 @@ local function begin_existing_setup(state, cx, index)
 		return
 	end
 	local hook = entry.path .. "/" .. config.setup_hook
-	if not tern.fs.exists(hook) then
+	if not has_setup_hook(entry) then
 		state.error = "This worktree has no setup hook: " .. hook
 		cx:render()
 		return
@@ -563,9 +575,11 @@ tern.block.define("inventory", {
 		end
 		if state.mode == "setup_select" then
 			table.insert(rows, ui.text({ ui.span("RUN SETUP", "strong") }))
-			table.insert(rows, ui.text({ ui.span("Choose a worktree", "muted") }))
+			table.insert(rows, ui.text({ ui.span(any_setup_hook(state.entries)
+				and "Choose a worktree whose setup hook you want to rerun"
+				or "No worktree has a setup hook. Setup is optional; select a worktree below to switch.", "muted") }))
 			for index, entry in state.entries do
-				if not entry.bare and not entry.prunable then
+				if has_setup_hook(entry) then
 					table.insert(rows, ui.node("item", {
 						key = "setup-" .. tostring(index),
 						label = tostring(index) .. ". " .. worktree_label(entry), detail = entry.path,
@@ -656,7 +670,8 @@ tern.block.define("inventory", {
 		}))
 		table.insert(rows, ui.node("item", {
 			key = "setup", label = "Run Setup", icon = "play",
-			disabled = state.mode ~= "list" or state.creating or state.created ~= nil,
+			disabled = state.mode ~= "list" or state.creating or state.created ~= nil
+				or not any_setup_hook(state.entries),
 			actions = { click = "setup" },
 		}))
 		table.insert(rows, ui.node("item", {
