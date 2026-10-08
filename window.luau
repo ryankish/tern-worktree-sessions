@@ -382,7 +382,7 @@ tern.command({ id = "run_setup", title = "Worktree: Run Setup", icon = "play", r
 end })
 tern.override("new_tab", new_worktree_shell)
 
-local function refresh_repo_inventories(cx, common_dir)
+local function refresh_repo_inventories(cx, common_dir, source_pane)
 	local host_id = cx.hosts:current().id
 	local sessions = {}
 	for _, session in cx.sessions:list() do
@@ -395,14 +395,33 @@ local function refresh_repo_inventories(cx, common_dir)
 	for _, tab in cx.session:tabs() do
 		if sessions[tab.session] then tabs[tab.id] = true end
 	end
+	local refreshed = {}
 	for _, pane in cx.session:panes() do
 		if tabs[pane.tab] and pane.block == "worktree.inventory" then
 			cx.session:event(pane.pane, { ev = "action", act = "refresh" })
+			refreshed[pane.pane] = true
+		end
+	end
+	if source_pane and not refreshed[source_pane] then
+		local source = cx.session:pane(source_pane)
+		if source and source.block == "worktree.inventory" then
+			cx.session:event(source_pane, { ev = "action", act = "refresh" })
 		end
 	end
 end
 
 tern.route.link(function(link, cx)
+	local encoded_refresh = string.match(link.url, "^tern%-worktree://refresh/([0-9a-f]+)$")
+	if encoded_refresh then
+		local common_dir = unhex(encoded_refresh)
+		if not common_dir then return { handled = true } end
+		local source = link.pane and cx.session:pane(link.pane)
+		if (not source or source.block ~= "worktree.inventory")
+			and window_common_dir ~= common_dir then return { handled = true } end
+		if window_common_dir and window_common_dir ~= common_dir then return { handled = true } end
+		refresh_repo_inventories(cx, common_dir, link.pane)
+		return { handled = true }
+	end
 	local removed_common, removed_path, anchor_path = string.match(link.url,
 		"^tern%-worktree://removed/([0-9a-f]+)/([0-9a-f]+)/([0-9a-f]+)$")
 	if removed_common then

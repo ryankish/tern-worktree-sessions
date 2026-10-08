@@ -485,6 +485,14 @@ refresh = function(state, cx)
 		end)
 end
 
+local function refresh_repo(state, cx)
+	if state.common_dir then
+		cx:open("tern-worktree://refresh/" .. hex(state.common_dir))
+	else
+		refresh(state, cx)
+	end
+end
+
 tern.block.define("inventory", {
 	init = function(cx, args, saved)
 		local pending = saved and saved.pending or nil
@@ -679,7 +687,7 @@ tern.block.define("inventory", {
 		}))
 		table.insert(rows, ui.node("item", {
 			key = "refresh", label = "↻ Refresh", icon = "refresh",
-			actions = { click = "refresh" },
+			actions = { click = "refresh_all" },
 		}))
 		local hint = state.mode == "setup_failed" and "s: retry setup · c: dismiss"
 			or (state.mode == "setup_choices" and "1–9: select · Enter: default · Esc: back")
@@ -777,7 +785,7 @@ tern.block.define("inventory", {
 			return true
 		end
 		if key.name ~= "r" then return false end
-		refresh(state, cx)
+		refresh_repo(state, cx)
 		return true
 	end,
 	event = function(state, ev, cx)
@@ -788,6 +796,8 @@ tern.block.define("inventory", {
 		if ev.ev ~= "action" then return end
 		if ev.act == "refresh" then
 			refresh(state, cx)
+		elseif ev.act == "refresh_all" then
+			refresh_repo(state, cx)
 		elseif ev.act == "host_kind" then
 			if ev.value == "local" or ev.value == "remote" then
 				state.host_kind = ev.value
