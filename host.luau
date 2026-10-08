@@ -60,6 +60,30 @@ local function remove_candidate(state, index)
 	return entry
 end
 
+local function available_anchor(state, excluded)
+	for _, entry in state.entries do
+		if entry.path ~= excluded and not entry.prunable and tern.fs.exists(entry.path) then
+			return entry.path
+		end
+	end
+	return nil
+end
+
+local function unavailable_sessions(state)
+	local entries = {}
+	if not state.ready then return entries end
+	for _, path in state.managed_paths or {} do
+		local found = nil
+		for _, entry in state.entries do
+			if entry.path == path then found = entry; break end
+		end
+		if not found or found.prunable or not tern.fs.exists(path) then
+			table.insert(entries, { path = path, entry = found })
+		end
+	end
+	return entries
+end
+
 local refresh
 
 local function process_error(result, fallback)
@@ -433,6 +457,49 @@ local function remove_worktree(state, cx)
 		end)
 end
 
+local function cleanup_stale_session(state, cx)
+	local target = state.stale_target
+	if state.creating or not target or not state.common_dir or not state.ready then return end
+	local anchor = available_anchor(state, target)
+	if not anchor then
+		state.error = "No available worktree can anchor this repository; reconnect or restore one first"
+		cx:render()
+		return
+	end
+	state.creating = true
+	state.progress = "Checking worktrees…"
+	cx:render()
+	tern.process.run({ "git", "-C", anchor, "worktree", "list", "--porcelain", "-z" },
+		{ timeout_ms = 10000 }, function(result)
+			if not alive(cx.pane) then return end
+			local entries, err = nil, nil
+			if result.status == 0 then entries, err = parse.parse_porcelain(result.stdout) end
+			state.creating = false
+			if not entries then
+				state.error = result.status ~= 0 and process_error(result, "Could not check worktrees") or err
+				cx:render()
+				return
+			end
+			for _, entry in entries do
+				if entry.path == target and not entry.prunable and tern.fs.exists(target) then
+					state.error = "Worktree is available again; refresh before cleaning up"
+					state.stale_target = nil
+					state.mode = "list"
+					cx:render()
+					return
+				end
+			end
+			tern.kv.set("setup:" .. hex(state.common_dir) .. ":" .. hex(target), nil)
+			state.stale_target = nil
+			state.mode = "list"
+			state.error = nil
+			state.cwd = anchor
+			cx:save()
+			cx:open("tern-worktree://stale-cleanup/" .. hex(state.common_dir) .. "/"
+				.. hex(target) .. "/" .. hex(anchor))
+		end)
+end
+
 refresh = function(state, cx)
 	state.generation += 1
 	local generation = state.generation
@@ -440,7 +507,7 @@ refresh = function(state, cx)
 	state.ready = false
 	state.error = nil
 	cx:render()
-	local cwd = state.cwd
+	local cwd = available_anchor(state) or state.cwd
 	tern.process.run({ "git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir" },
 		{ timeout_ms = 10000 }, function(common)
 			if not alive(cx.pane) or generation ~= state.generation then return end
@@ -524,6 +591,8 @@ tern.block.define("inventory", {
 			setup_selected = false,
 			has_policy = false,
 			remove_target = nil,
+			stale_target = nil,
+			managed_paths = {},
 		}
 		if state.created and not state.setup_error then
 			state.setup_error = "Setup status is unknown after restart; retry or open anyway"
@@ -650,24 +719,59 @@ tern.block.define("inventory", {
 				}))
 			end
 		end
+		if state.mode == "stale_confirm" and state.stale_target then
+			table.insert(rows, ui.text({ ui.span("CLOSE UNAVAILABLE SESSION?", "strong") }))
+			table.insert(rows, ui.text(state.stale_target))
+			table.insert(rows, ui.text({ ui.span(
+				"This ends its Tern panes and processes. Git files and branches are untouched.", "warning") }))
+			if state.creating then
+				table.insert(rows, ui.text({ ui.span(state.progress, "muted") }))
+			else
+				table.insert(rows, ui.el("div", { class = "wt-setup-actions" }, {
+					ui.el("button", { key = "close-stale", class = "wt-setup-button primary",
+						text = "Close Tern session", actions = { click = "confirm_stale" } }),
+					ui.el("button", { key = "cancel-stale", class = "wt-setup-button secondary",
+						text = "Cancel", actions = { click = "cancel_stale" } }),
+				}))
+			end
+		end
 		local active = active_worktree(state)
+		local stale_sessions = unavailable_sessions(state)
+		local stale_paths = {}
+		for _, stale in stale_sessions do stale_paths[stale.path] = true end
 		local items = {}
 		for index, entry in state.entries do
+			if stale_paths[entry.path] then continue end
 			local label = worktree_label(entry)
-			local value = entry.prunable and "prunable" or (entry.locked and "locked" or nil)
+			local unavailable = entry.prunable or not tern.fs.exists(entry.path)
+			local value = unavailable and "unavailable" or (entry.locked and "locked" or nil)
 			table.insert(items, ui.node("item", {
 				key = tostring(#items + 1),
 				label = (entry == active and "● " or "  ") .. label,
 				detail = entry.path,
 				value = value,
 				icon = "branch",
-				tone = entry == active and "accent" or (entry.prunable and "warning" or nil),
+				tone = unavailable and "warning" or (entry == active and "accent" or nil),
 				disabled = state.mode == "remove" or state.mode == "remove_confirm"
-					or state.error ~= nil or entry.prunable or entry.bare,
+					or state.mode == "stale_confirm" or state.error ~= nil or unavailable or entry.bare,
 				actions = { click = "switch=" .. tostring(index) },
 			}))
 		end
 		table.insert(rows, ui.section("WORKTREES", items))
+		local stale_items = {}
+		for index, stale in stale_sessions do
+			local name = stale.entry and worktree_label(stale.entry)
+				or (string.match(stale.path, "([^/]+)$") or stale.path)
+			table.insert(stale_items, ui.node("item", {
+				key = "stale-" .. tostring(index), label = (state.cwd == stale.path and "● " or "  ") .. name,
+				detail = stale.path, value = "unavailable", tone = "warning", icon = "branch",
+				disabled = state.mode ~= "list" or state.creating,
+				actions = { click = "stale_select=" .. tostring(index) },
+			}))
+		end
+		if #stale_items > 0 then
+			table.insert(rows, ui.section("UNAVAILABLE SESSIONS", stale_items))
+		end
 		table.insert(rows, ui.rule(""))
 		table.insert(rows, ui.node("item", {
 			key = "new", label = "+ New Worktree", icon = "plus",
@@ -694,6 +798,7 @@ tern.block.define("inventory", {
 			or (state.mode == "setup_select" and "1–9: select · Esc: cancel")
 			or (state.mode == "remove" and "1–9: select · Esc: cancel")
 			or (state.mode == "remove_confirm" and "Enter: remove · Esc: cancel")
+			or (state.mode == "stale_confirm" and "Enter: close session · Esc: cancel")
 			or "n: new · s: setup · d: remove · r: refresh"
 		return { main = ui.col(rows), dock = ui.col({ ui.text({ ui.span(hint, "muted") }) }) }
 	end,
@@ -772,6 +877,15 @@ tern.block.define("inventory", {
 			remove_worktree(state, cx)
 			return true
 		end
+		if state.mode == "stale_confirm" then
+			if key.name == "escape" and not state.creating then
+				state.mode = "list"; state.stale_target = nil; state.error = nil
+				return true
+			elseif key.name == "enter" then
+				cleanup_stale_session(state, cx)
+				return true
+			end
+		end
 		if key.name == "n" and state.mode == "list" then begin_new(state, cx); return true end
 		if key.name == "d" and state.mode == "list" and not state.creating and not state.created then
 			state.mode = "remove"
@@ -796,6 +910,11 @@ tern.block.define("inventory", {
 		if ev.ev ~= "action" then return end
 		if ev.act == "refresh" then
 			refresh(state, cx)
+		elseif ev.act == "managed_paths" then
+			if type(ev.value) == "table" then
+				state.managed_paths = ev.value
+				cx:render()
+			end
 		elseif ev.act == "refresh_all" then
 			refresh_repo(state, cx)
 		elseif ev.act == "host_kind" then
@@ -834,6 +953,25 @@ tern.block.define("inventory", {
 			if state.mode == "remove" then select_removal(state, cx, tonumber(ev.value)) end
 		elseif ev.act == "confirm_remove" then
 			if state.mode == "remove_confirm" then remove_worktree(state, cx) end
+		elseif ev.act == "stale_select" then
+			if state.mode == "list" and state.ready and not state.creating then
+				local stale = unavailable_sessions(state)[tonumber(ev.value)]
+				if stale then
+					state.stale_target = stale.path
+					state.mode = "stale_confirm"
+					state.error = nil
+					cx:render()
+				end
+			end
+		elseif ev.act == "confirm_stale" then
+			if state.mode == "stale_confirm" then cleanup_stale_session(state, cx) end
+		elseif ev.act == "cancel_stale" then
+			if state.mode == "stale_confirm" and not state.creating then
+				state.mode = "list"
+				state.stale_target = nil
+				state.error = nil
+				cx:render()
+			end
 		elseif ev.act == "cancel_remove" then
 			if not state.creating then
 				state.mode = "list"

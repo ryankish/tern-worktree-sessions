@@ -385,10 +385,12 @@ tern.override("new_tab", new_worktree_shell)
 local function refresh_repo_inventories(cx, common_dir, source_pane)
 	local host_id = cx.hosts:current().id
 	local sessions = {}
+	local paths = {}
 	for _, session in cx.sessions:list() do
 		local identity = session_identity(session.name)
 		if session.host == host_id and identity and identity.common_dir == common_dir then
 			sessions[session.id] = true
+			table.insert(paths, identity.path)
 		end
 	end
 	local tabs = {}
@@ -398,6 +400,7 @@ local function refresh_repo_inventories(cx, common_dir, source_pane)
 	local refreshed = {}
 	for _, pane in cx.session:panes() do
 		if tabs[pane.tab] and pane.block == "worktree.inventory" then
+			cx.session:event(pane.pane, { ev = "action", act = "managed_paths", value = paths })
 			cx.session:event(pane.pane, { ev = "action", act = "refresh" })
 			refreshed[pane.pane] = true
 		end
@@ -405,6 +408,7 @@ local function refresh_repo_inventories(cx, common_dir, source_pane)
 	if source_pane and not refreshed[source_pane] then
 		local source = cx.session:pane(source_pane)
 		if source and source.block == "worktree.inventory" then
+			cx.session:event(source_pane, { ev = "action", act = "managed_paths", value = paths })
 			cx.session:event(source_pane, { ev = "action", act = "refresh" })
 		end
 	end
@@ -424,6 +428,12 @@ tern.route.link(function(link, cx)
 	end
 	local removed_common, removed_path, anchor_path = string.match(link.url,
 		"^tern%-worktree://removed/([0-9a-f]+)/([0-9a-f]+)/([0-9a-f]+)$")
+	local stale_cleanup = false
+	if not removed_common then
+		removed_common, removed_path, anchor_path = string.match(link.url,
+			"^tern%-worktree://stale%-cleanup/([0-9a-f]+)/([0-9a-f]+)/([0-9a-f]+)$")
+		stale_cleanup = removed_common ~= nil
+	end
 	if removed_common then
 		local common_dir, path, anchor = unhex(removed_common), unhex(removed_path), unhex(anchor_path)
 		if not common_dir or not path or not anchor then return { handled = true } end
@@ -441,6 +451,7 @@ tern.route.link(function(link, cx)
 			end
 		end
 		refresh_repo_inventories(cx, common_dir)
+		if stale_cleanup then cx:toast("success", "Closed unavailable worktree session", path) end
 		return { handled = true }
 	end
 	local action, encoded_common, encoded_path = string.match(link.url,
