@@ -489,7 +489,7 @@ tern.command({ id = "open_git", title = "Worktree: Open Git Tab", icon = "branch
 	run = function(cx) open_managed_tab(cx, "git") end })
 tern.override("new_tab", new_worktree_shell)
 
-local function refresh_repo_inventories(cx, common_dir, source_pane, visible_session)
+local function refresh_repo_inventories(cx, common_dir, source_pane, visible_session, force_pr)
 	local host_id = cx.hosts:current().id
 	local sessions = {}
 	local paths = {}
@@ -507,10 +507,12 @@ local function refresh_repo_inventories(cx, common_dir, source_pane, visible_ses
 		if sessions[tab.session] then tabs[tab.id] = true end
 	end
 	local refreshed = {}
+	local force_pending = force_pr
 	for _, pane in cx.session:panes() do
 		if tabs[pane.tab] and pane.block == "worktree.inventory" then
 			cx.session:event(pane.pane, { ev = "action", act = "managed_paths", value = paths })
-			cx.session:event(pane.pane, { ev = "action", act = "refresh" })
+			cx.session:event(pane.pane, { ev = "action", act = "refresh", force_pr = force_pending })
+			force_pending = false
 			refreshed[pane.pane] = true
 		end
 	end
@@ -518,7 +520,7 @@ local function refresh_repo_inventories(cx, common_dir, source_pane, visible_ses
 		local source = cx.session:pane(source_pane)
 		if source and source.block == "worktree.inventory" then
 			cx.session:event(source_pane, { ev = "action", act = "managed_paths", value = paths })
-			cx.session:event(source_pane, { ev = "action", act = "refresh" })
+			cx.session:event(source_pane, { ev = "action", act = "refresh", force_pr = force_pending })
 		end
 	end
 	last_refresh_at = tern.now()
@@ -534,7 +536,7 @@ tern.command({ id = "refresh", title = "Worktree: Refresh", icon = "refresh", ru
 			return
 		end
 		ensure_inventories(cx, current.id, identity.path)
-		refresh_repo_inventories(cx, identity.common_dir)
+		refresh_repo_inventories(cx, identity.common_dir, nil, nil, true)
 	else
 		open_inventory(cx, "refresh_all")
 	end
@@ -557,7 +559,46 @@ local function maybe_auto_refresh(cx)
 end
 
 tern.route.link(function(link, cx)
+	local encoded_github = string.match(link.url, "^tern%-worktree://github/([0-9a-f]+)$")
+	if encoded_github then
+		local url = unhex(encoded_github)
+		if not url or #url > 4096 or not string.match(url, "^https://[^/%s]+/") then
+			return { handled = true }
+		end
+		local argv = nil
+		if tern.runtime.os == "macos" then
+			argv = { "/usr/bin/open", url }
+		elseif tern.runtime.os == "linux" then
+			argv = { "xdg-open", url }
+		elseif tern.runtime.os == "windows" then
+			argv = { "rundll32.exe", "url.dll,FileProtocolHandler", url }
+		end
+		if not argv then
+			cx:copy(url)
+			cx:toast("error", "Could not open GitHub externally", "Link copied to clipboard")
+			return { handled = true }
+		end
+		local ok, err = pcall(function()
+			tern.process.run(argv, { timeout_ms = 10000 }, function(result, result_cx)
+				if result.status ~= 0 and result_cx then
+					result_cx:copy(url)
+					result_cx:toast("error", "Could not open GitHub externally",
+						"Link copied to clipboard")
+				end
+			end)
+		end)
+		if not ok then
+			cx:copy(url)
+			cx:toast("error", "Could not open GitHub externally", tostring(err))
+		end
+		return { handled = true }
+	end
 	local encoded_refresh = string.match(link.url, "^tern%-worktree://refresh/([0-9a-f]+)$")
+	local force_pr = false
+	if not encoded_refresh then
+		encoded_refresh = string.match(link.url, "^tern%-worktree://refresh%-pr/([0-9a-f]+)$")
+		force_pr = encoded_refresh ~= nil
+	end
 	if encoded_refresh then
 		local common_dir = unhex(encoded_refresh)
 		if not common_dir then return { handled = true } end
@@ -565,7 +606,7 @@ tern.route.link(function(link, cx)
 		if (not source or source.block ~= "worktree.inventory")
 			and window_common_dir ~= common_dir then return { handled = true } end
 		if window_common_dir and window_common_dir ~= common_dir then return { handled = true } end
-		refresh_repo_inventories(cx, common_dir, link.pane)
+		refresh_repo_inventories(cx, common_dir, link.pane, nil, force_pr)
 		return { handled = true }
 	end
 	local removed_common, removed_path, anchor_path = string.match(link.url,

@@ -1,6 +1,7 @@
 local parse = require("./parse")
 local config = require("./config")
 local setup_policy = require("./setup_policy")
+local github_pr = require("./github_pr")
 local ui = tern.ui
 
 local function alive(pane)
@@ -500,7 +501,7 @@ local function cleanup_stale_session(state, cx)
 		end)
 end
 
-refresh = function(state, cx)
+refresh = function(state, cx, force_pr)
 	state.generation += 1
 	local generation = state.generation
 	state.loading = true
@@ -533,6 +534,7 @@ refresh = function(state, cx)
 						if entries then
 							state.entries = entries
 							state.ready = true
+							github_pr.attach(state.common_dir, cwd, entries, cx, force_pr)
 						end
 					end
 					state.loading = false
@@ -562,10 +564,20 @@ end
 
 local function refresh_repo(state, cx)
 	if state.common_dir then
-		cx:open("tern-worktree://refresh/" .. hex(state.common_dir))
+		cx:open("tern-worktree://refresh-pr/" .. hex(state.common_dir))
 	else
-		refresh(state, cx)
+		refresh(state, cx, true)
 	end
+end
+
+local function pr_button(status, busy)
+	if busy then return "↑ Pushing", "pushing" end
+	local labels = {
+		none = "↑ Push + PR", open = "● Open PR", draft = "◐ Draft PR",
+		merged = "✓ Merged", closed = "× Closed", checking = "… PR",
+		unavailable = "? PR", base = "PRs", detached = "Detached",
+	}
+	return labels[status.kind] or "? PR", status.kind
 end
 
 tern.block.define("inventory", {
@@ -754,16 +766,38 @@ tern.block.define("inventory", {
 			local label = worktree_label(entry)
 			local unavailable = entry.prunable or not tern.fs.exists(entry.path)
 			local value = unavailable and "unavailable" or (entry.locked and "locked" or nil)
-			table.insert(items, ui.node("item", {
-				key = tostring(#items + 1),
-				label = (entry == active and "● " or "  ") .. label,
-				detail = entry.path,
-				value = value,
-				icon = "branch",
-				tone = unavailable and "warning" or (entry == active and "accent" or nil),
-				disabled = state.mode == "remove" or state.mode == "remove_confirm"
-					or state.mode == "stale_confirm" or state.error ~= nil or unavailable or entry.bare,
-				actions = { click = "switch=" .. tostring(index) },
+			local status = github_pr.status(state.common_dir, entry)
+			local busy = github_pr.busy(state.common_dir, entry)
+			local button_text, button_kind = pr_button(status, busy)
+			local button_title = status.kind == "base" and
+				"Open all pull requests for this repository"
+				or (status.kind == "none" and
+				"Push this branch, then open GitHub's new pull request page")
+				or (status.error or (status.url and "Open pull request on GitHub" or button_text))
+			local actionable = not (busy or unavailable or entry.bare
+				or status.kind == "detached"
+				or status.kind == "checking")
+			local pr_control = actionable and ui.el("button", {
+				key = "pr", class = "wt-pr-button " .. button_kind,
+				text = button_text, aria = status.kind == "base"
+					and "Repository pull requests" or "Pull request: " .. button_text,
+				title = button_title, actions = { click = "pr_action=" .. tostring(index) },
+			}) or ui.el("span", {
+				key = "pr", class = "wt-pr-button wt-pr-inert " .. button_kind,
+				text = button_text, aria = "Pull request: " .. button_text,
+				title = button_title,
+			})
+			table.insert(items, ui.el("div", { key = "worktree-" .. tostring(index),
+				class = "wt-worktree-row" }, {
+				ui.node("item", {
+					key = "switch", label = (entry == active and "● " or "  ") .. label,
+					detail = entry.path, value = value, icon = "branch",
+					tone = unavailable and "warning" or (entry == active and "accent" or nil),
+					disabled = state.mode == "remove" or state.mode == "remove_confirm"
+						or state.mode == "stale_confirm" or state.error ~= nil or unavailable or entry.bare,
+					actions = { click = "switch=" .. tostring(index) },
+				}),
+				pr_control,
 			}))
 		end
 		table.insert(rows, ui.section("WORKTREES", items))
@@ -918,7 +952,7 @@ tern.block.define("inventory", {
 		end
 		if ev.ev ~= "action" then return end
 		if ev.act == "refresh" then
-			refresh(state, cx)
+			refresh(state, cx, ev.force_pr)
 		elseif ev.act == "discover" then
 			if state.mode == "list" and not state.creating and not state.created then
 				if type(ev.cwd) == "string" and ev.cwd ~= "" then state.cwd = ev.cwd end
@@ -1012,6 +1046,17 @@ tern.block.define("inventory", {
 			if entry and state.mode ~= "remove" and state.mode ~= "remove_confirm"
 				and not state.error and not entry.prunable and not entry.bare and state.common_dir then
 				cx:open("tern-worktree://switch/" .. hex(state.common_dir) .. "/" .. hex(entry.path))
+			end
+		elseif ev.act == "pr_action" then
+			local index = tonumber(ev.value)
+			local entry = index and state.entries[index]
+			if entry and state.ready and not state.creating and not entry.bare
+				and not entry.prunable and tern.fs.exists(entry.path) and state.common_dir then
+				local status = github_pr.status(state.common_dir, entry)
+				if status.kind ~= "detached"
+					and status.kind ~= "checking" then
+					github_pr.activate(state.common_dir, entry, cx)
+				end
 			end
 		end
 	end,
