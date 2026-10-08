@@ -331,6 +331,50 @@ local function ensure_initialized(cx, session, path, starter)
 	end
 end
 
+local function restore_git_pane(cx, session, tab, path)
+	local nav, exited = nil, {}
+	for _, item in cx.session:panes() do
+		if item.tab == tab then
+			if item.block == "worktree.inventory" then
+				nav = item.pane
+			elseif not item.exited then
+				-- A live shell may be running something other than lazygit; preserve it.
+				return item.pane
+			else
+				table.insert(exited, item.pane)
+			end
+		end
+	end
+	if not nav then
+		ensure_inventories(cx, session.id, path)
+		for _, item in cx.session:panes() do
+			if item.tab == tab and item.block == "worktree.inventory" then nav = item.pane; break end
+		end
+	end
+	if not nav then
+		cx:toast("error", "Cannot restore Git pane", "Worktree inventory pane is unavailable")
+		return nil
+	end
+	for _, pane in exited do cx.layout:close(pane) end
+	local pane = cx.layout:split(nav, "right", { cwd = path }, { focus = false })
+	if not pane then
+		cx:toast("error", "Cannot restore Git pane")
+		return nil
+	end
+	start_shell(cx, pane, path, config.git_command)
+	local function nav_share()
+		local layout = cx.session:layout(tab)
+		local root = layout and layout.root
+		if root and root.split == "right" and root[1] and root[1].pane == nav then
+			return root.ratio or 0.5
+		end
+		return nil
+	end
+	set_share(cx, nav, "right", 0.22, nav_share)
+	keep_git_last(cx, session.id)
+	return pane
+end
+
 local function open_managed_tab(cx, name)
 	local session = cx.sessions:current()
 	local identity = session_identity(session.name)
@@ -353,7 +397,9 @@ local function open_managed_tab(cx, name)
 	ensure_inventories(cx, session.id, identity.path)
 	local layout = cx.session:layout(tab)
 	local pane = layout and layout.focus
-	if not existed then
+	if name == "git" then
+		pane = restore_git_pane(cx, session, tab, identity.path) or pane
+	elseif not existed then
 		for _, item in cx.session:panes() do
 			if item.tab == tab and item.block ~= "worktree.inventory" then
 				pane = item.pane
