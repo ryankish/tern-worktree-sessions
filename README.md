@@ -1,75 +1,219 @@
-# Worktree Workspace
+# Worktree Sessions
 
-A Tern plugin for Git worktree navigation and persistent workspace sessions.
+A [Tern](https://stencil.so/tern) plugin that gives every Git
+worktree its own persistent session: your editor, agents and Git UI, already
+open in that worktree, a click away. New worktrees can run the repository's own
+setup, with questions asked in Tern, before anything opens.
+
+<!-- TODO: screenshot or GIF of the panel and a switch between worktrees -->
+
+- **One session per worktree.** Switching hides the other worktrees' tabs
+  without stopping their programs. Your nvim buffers and agent runs are where
+  you left them.
+- **Your layout, not ours.** Tabs, panes and commands come from a small JSON
+  file that survives plugin updates. The defaults are nvim + Codex, two spare
+  shells, and lazygit.
+- **Create and remove worktrees in place.** Type a branch name and get a ready
+  session; removal refuses dirty worktrees.
+- **Optional per-repo setup.** A repository can ask questions ("share the venv
+  or build a new one?"), run a setup script, and prepare every new shell.
+- **Pull request status** for each branch, with one click to push and open a
+  PR on GitHub.
+- **Remote hosts.** Works on worktrees on any machine Tern connects to.
 
 ## Install
 
-Clone this repository as the `worktree` directory in Tern's plugin directory
-(`tern plugin dir` prints it), then reload plugins:
-
 ```sh
-git clone https://github.com/ryankish/tern-worktree-sessions.git "$(tern plugin dir)/worktree"
-tern plugin reload
+tern plugin install github.com/ryankish/tern-worktree-sessions
 ```
 
-## Usage
+`tern plugin list` should show `worktree-sessions ... ready`. For worktrees on
+a remote host, install the plugin on that host too.
 
-In a Git pane, run **Worktree: Discover** from the
-command palette. It opens a persistent worktree panel to the left of the
-focused pane, on that pane's Tern host and in its current working directory.
-Running the command again focuses the existing panel. Press `r` in the panel to
-refresh. The block runs `git worktree list --porcelain -z` on its host. A
-remote host needs the same plugin installed in its Tern plugin directory. No
-repository files are copied locally.
+To open the panel with a key, add a binding to Tern's `settings.json`:
 
-The plugin discovers the Git common directory, paths, HEADs, branches, detached
-and bare worktrees, and locked or prunable entries. Click an available worktree
-row to switch to its persistent Tern session. The first click creates its
-`editor`, `agents`, and `git` tabs with the default commands and split ratios;
-later clicks adopt the same session without restarting its programs. The
-`Worktree: Switch` command opens the inventory from another tab or session.
-An incomplete default tab is retried on a later switch or window open; tabs
-that already exist are adopted. A managed window stays bound to its repository.
-The command tabs start as interactive shells, source an optional worktree shell
-hook, then run `nvim`, `codex`, or `lazygit`. This loads shell aliases such as
-`codex` from `.zshrc` and leaves a usable shell if a command is missing or
-exits. New Agents panes, `Cmd+T` shells, and ordinary shell splits source the
-same hook. Restored panes are adopted without sourcing it again.
+```json
+"keybinds": {
+  "cmd+shift+w": "plugin.worktree-sessions.switch"
+}
+```
 
-Sessions use an exact encoding of the Git common directory and worktree path,
-so branch renames do not change their identity. Tern 0.5.3 has no plugin API for
-custom sidebar chrome: the worktree UI is an ordinary left pane in every
-managed tab, including tabs restored from the previous plugin version. New
-sessions place it in a full-height column; existing tabs are rearranged into
-the same layout without restarting their panes. The repo name becomes the
-window title after a managed worktree session is selected. In a managed
-session, `Cmd+T` opens an ordinary shell in the focused pane's current directory
-on the session's Tern host. New shell tabs go immediately before `git`; the
-plugin also moves `git` back to the right edge when a managed tab is focused.
-If Tern does not know the focused pane's directory, it shows an error instead
-of guessing a different directory.
+## Quick start
 
-Click **+ New Worktree**, press `n` while the worktree pane is focused, or run
-**Worktree: New** from the command palette. Enter a branch name and press Enter.
-An existing local branch is checked out; a new branch starts at the current
-worktree's HEAD. The path is chosen under a sibling `<repo>-worktrees`
-directory, with a numeric suffix when needed. Git runs on the pane's host.
+No configuration is needed.
 
-The setup questions and hook are read from the **active checkout** when creation
-starts. Edits there can affect the next worktree without changing the primary
-checkout. If `<active-checkout>/.tern/worktree-setup` exists, the plugin runs it
-on that host after `git worktree add` and before opening the default tabs. The
-hook must be executable. It runs in the new worktree with these arguments:
-`primary-checkout`, `new-worktree-path`, `branch`. It also receives
-`TERN_WORKTREE_REPO_ROOT`, `TERN_WORKTREE_PATH`, `TERN_WORKTREE_BRANCH`,
-`TERN_WORKTREE_SETUP_SOURCE`, `TERN_WORKTREE_HOST`, and `TERN_WORKTREE_HOST_KIND`.
-`TERN_WORKTREE_SETUP_SOURCE` is the checkout supplying the hook. A failed hook
-leaves the worktree in place and offers **Retry setup** or **Open workspace
-anyway**.
+1. In any pane inside a Git repository, run **Worktree Sessions: Discover**
+   from the command palette. A worktree panel opens on the left.
+2. Click a worktree. Its session opens with three tabs:
+   - `editor`: nvim above `codex`
+   - `agents`: two shells
+   - `git`: lazygit, always the rightmost tab
+3. Press **+ New Worktree** (or `n` in the panel), type a branch name, and
+   press Enter. An existing branch is checked out; a new branch starts at the
+   current worktree's HEAD. Worktrees go in a sibling `<repo>-worktrees/`
+   directory.
 
-For setup choices, add `.tern/worktree-setup.json` beside the hook in the
-active checkout. The JSON contains only questions and opaque
-choice IDs; Tern does not interpret their meanings. For example:
+`Cmd+T` in a worktree session opens a shell tab in that worktree, placed before
+`git`. Every tab gets the panel on its left.
+
+## Configure your layout
+
+Run **Worktree Sessions: Edit Config**. It creates `config.json` in the
+plugin's data directory, filled in with the defaults, and opens it. Save, then
+run:
+
+```sh
+tern plugin reload worktree-sessions
+```
+
+The file lives outside the plugin directory, so `tern plugin install --force`
+updates the plugin without touching it. Keys you leave out keep their
+defaults. New tabs use the new layout. Tabs that already exist keep theirs.
+
+The defaults:
+
+```json
+{
+  "panel_ratio": 0.22,
+  "tabs": [
+    { "name": "editor", "split": "down", "ratio": 0.65,
+      "panes": [ { "command": "nvim" }, { "command": "codex" } ] },
+    { "name": "agents", "split": "right", "ratio": 0.5,
+      "panes": [ {}, {} ] },
+    { "name": "git", "pin": "right",
+      "panes": [ { "command": "lazygit" } ] }
+  ],
+  "setup_hook": ".tern/worktree-sessions/setup",
+  "shell_hook": ".tern/worktree-sessions/shell"
+}
+```
+
+| Key | Meaning |
+| --- | --- |
+| `panel_ratio` | Width of the worktree panel, as a share of the tab (0.1 to 0.9). |
+| `tabs` | The tabs each new worktree session gets, in order. |
+| `tabs[].name` | Tab name: letters, digits, `-` or `_`. Each gets an **Open \<name\> Tab** command. |
+| `tabs[].split` | `"right"` (side by side) or `"down"` (stacked). Default `"right"`. |
+| `tabs[].ratio` | The first pane's share. Later panes split the rest evenly. Default: all panes equal. |
+| `tabs[].pin` | `"right"` keeps the tab at the right edge, even after `Cmd+T`. |
+| `tabs[].panes` | 1 to 6 panes. A pane's `command` runs in an interactive login shell. A pane without one is a plain shell. |
+| `setup_hook`, `shell_hook` | Where repositories keep their [setup files](#repository-setup), relative to the repository root. |
+
+Commands run in a login shell, so shell aliases and functions work. If a
+command exits or is missing, you are left at a shell prompt in that pane. A
+malformed file doesn't break the plugin: it uses the defaults and shows the
+error when you open the panel.
+
+### Example: the author's config
+
+The defaults with one change: the agent pane under nvim runs `codex`. Only
+`tabs` is set, so the panel width and hook paths keep their defaults.
+
+```json
+{
+  "tabs": [
+    { "name": "editor", "split": "down", "ratio": 0.65,
+      "panes": [ { "command": "nvim" }, { "command": "codex" } ] },
+    { "name": "agents", "split": "right", "ratio": 0.5,
+      "panes": [ {}, {} ] },
+    { "name": "git", "pin": "right",
+      "panes": [ { "command": "lazygit" } ] }
+  ]
+}
+```
+
+Another shape, for Claude Code users who prefer a wide editor:
+
+```json
+{
+  "tabs": [
+    { "name": "code", "split": "right", "ratio": 0.6,
+      "panes": [ { "command": "nvim" }, { "command": "claude" } ] },
+    { "name": "shell" },
+    { "name": "git", "pin": "right", "panes": [ { "command": "lazygit" } ] }
+  ]
+}
+```
+
+## Repository setup
+
+`git worktree add` gives you the tracked files and nothing else. A new
+worktree has no `.env`, no virtual environment, no build cache, and no links to
+data that lives outside the repo. Repository setup fixes that each time you
+make a worktree, the same way, without you remembering the steps.
+
+All of it is optional, and Tern doesn't interpret any of it. A repository can
+provide up to three files under `.tern/worktree-sessions/`:
+
+| File | When it runs | What it's for |
+| --- | --- | --- |
+| `setup.json` | Before `git worktree add` | Questions to ask in Tern. Answers are passed to `setup`. |
+| `setup` | Once, after `git worktree add` and before the tabs open | Preparing the worktree: environments, copied files, links. |
+| `shell` | In every new shell in the worktree | Fast per-shell changes, such as activating that worktree's venv. |
+
+Setup happens once per worktree, and the shell hook runs in every shell. Put
+slow or one-time work in `setup`, and keep `shell` quick and quiet.
+
+### Use cases
+
+These come from real repositories the plugin was built for.
+
+- **Share a Python environment or build a new one.** A uv project can ask, per
+  worktree, whether to run `uv sync` for an independent `.venv` or symlink the
+  primary checkout's `.venv`. Sharing is instant but couples the two worktrees.
+  An independent venv is safe for a branch that changes dependencies. The shell
+  hook then activates whichever `.venv` the worktree has. This is the
+  [uv example](examples/uv-venv) below.
+- **Bootstrap something expensive once.** Machine-learning stacks (PyTorch and
+  friends) can take many minutes to install. Setup can build the environment
+  once in the primary checkout and have later worktrees reuse it, along with
+  caches such as `.cache/`.
+- **Copy untracked files.** `.env`, local credentials and editor settings
+  aren't in Git, so a new worktree doesn't get them. Setup can copy them from
+  the primary checkout.
+- **Link large data instead of copying it.** Datasets and model weights stay
+  where they are. Setup links them into the worktree.
+- **Keep each branch's outputs apart.** Experiments on two branches shouldn't
+  write into the same results directory. The shell hook can export a
+  per-worktree output path, so each branch's runs land in their own place.
+- **Rules that change as the project does.** Setup files are read from the
+  checkout you are working in when you create the worktree, even if you haven't
+  committed your edits. Change the setup on your current branch, and the next
+  worktree you make uses it.
+
+A minimal setup hook covering the copy and link cases:
+
+```sh
+#!/bin/sh
+# .tern/worktree-sessions/setup — runs in the new worktree
+set -eu
+primary=$1
+[ -f "$primary/.env" ] && cp "$primary/.env" .env
+ln -s /data/shared-datasets data
+```
+
+And a shell hook that keeps each branch's results apart:
+
+```sh
+# .tern/worktree-sessions/shell
+export RESULTS_DIR="$HOME/results/$(basename "$WORKTREE_SESSION_PATH")"
+mkdir -p "$RESULTS_DIR"
+```
+
+### Example: uv, with a shared or independent venv
+
+[`examples/uv-venv`](examples/uv-venv) has all three files. Copy them into
+your repository and commit them:
+
+```sh
+mkdir -p .tern/worktree-sessions
+cp path/to/tern-worktree-sessions/examples/uv-venv/* .tern/worktree-sessions/
+```
+
+**+ New Worktree** now asks how to set up the environment, runs `uv sync` or
+links the venv, and opens the tabs with the venv active in every shell.
+
+### `setup.json`: questions
 
 ```json
 {
@@ -77,59 +221,126 @@ choice IDs; Tern does not interpret their meanings. For example:
   "questions": [
     {
       "id": "environment",
-      "label": "How should this worktree use its environment?",
+      "label": "How should this worktree use the uv environment?",
       "default": "independent",
       "choices": [
-        { "id": "independent", "label": "Independent environment" },
-        { "id": "shared", "label": "Share the primary environment" }
+        { "id": "independent", "label": "Independent venv",
+          "description": "Run uv sync and create this worktree's own .venv." },
+        { "id": "shared", "label": "Share the primary checkout's venv" }
       ]
     }
   ]
 }
 ```
 
-Tern asks these questions after the branch name and before `git worktree add`.
-Each question and choice may also have a `description`. It passes the answers
-to the hook as a JSON object in `TERN_WORKTREE_SETUP_CHOICES_JSON`, and saves
-them with the worktree identity after setup succeeds. The hook stays in charge
-of all project-specific actions. The policy and hook run on the Tern host; the
-new worktree does not need its own copy of either file for creation-time setup.
+Tern asks the questions after the branch name, before it creates anything.
+Questions and choices may have a `description`. IDs are yours: Tern only
+passes the chosen IDs to `setup` as a JSON object, such as
+`{"environment":"shared"}`, and remembers them for that worktree.
 
-**Worktree: Run Setup** (or **Run Setup** in the worktree pane) selects an
-existing worktree, including the primary checkout, and asks its current setup
-questions again. It runs that worktree's own hook in place. This is explicit:
-changing setup files does not rerun them automatically, and running setup does
-not restart or change the environment of existing panes.
+### `setup`: the setup hook
 
-To initialize each *new* interactive shell, a repository may provide
-`<worktree>/.tern/worktree-shell`. Tern sources it in that worktree's shell,
-including shells that go on to launch `nvim`, `codex`, and `lazygit`. The hook
-does not need to be executable; it must use POSIX-compatible shell syntax.
-This version supports zsh, bash, sh, ksh, dash, and ash. Other shells keep
-their normal command startup and show an unsupported-hook error. Tern exports
-`TERN_WORKTREE_PATH` before sourcing it. The pane keeps its initial cwd, so a
-shell opened from a nested directory stays there. A hook failure remains
-visible in the pane and prevents that pane's default command from starting.
+It must be executable and can be written in any language. It runs in the new
+worktree on the worktree's host. It has up to 15 minutes.
 
-The setup hook owns environment creation; the shell hook owns per-shell
-environment changes. Other repositories can export paths or source their own
-language tools without Tern interpreting a `.venv` or a package manager.
-The shell hook is read from the worktree that owns the new pane. Commit it so
-new branches contain it, or have the setup hook create it in the new worktree.
-Uncommitted files in the source checkout are not copied by `git worktree add`.
+Arguments: `primary-checkout new-worktree-path branch`.
 
-To remove a secondary worktree, click **− Remove Worktree**, press `d` in the
-worktree pane, or run **Worktree: Remove**. Select its path (keys `1`–`9` also
-select the numbered entries), then confirm with the button or Enter.
-The plugin rechecks its Git identity before calling `git worktree remove`
-without force. Git errors, including dirty or locked worktrees, leave its
-Tern session intact. After a successful removal, Tern closes that worktree's
-session and its processes. If it was active, the window switches to the main
-worktree. The main worktree is not offered for removal. Git branches remain in
-place after their worktrees are removed.
+Environment:
 
-Edit `config.luau` to override the `nvim`, `codex`, or
-`lazygit` command, either content split ratio, or either relative hook path.
-Run `tern plugin reload` afterward. These values apply when new default tabs
-are created; existing tabs keep their processes and layout. On a remote
-host, install the same plugin configuration there for matching defaults.
+| Variable | Value |
+| --- | --- |
+| `WORKTREE_SESSION_REPO_ROOT` | The primary checkout |
+| `WORKTREE_SESSION_PATH` | The new worktree |
+| `WORKTREE_SESSION_BRANCH` | Its branch |
+| `WORKTREE_SESSION_SETUP_SOURCE` | The checkout the setup files were read from |
+| `WORKTREE_SESSION_SETUP_CHOICES_JSON` | Answers to `setup.json`, or `{}` |
+| `WORKTREE_SESSION_HOST`, `WORKTREE_SESSION_HOST_KIND` | The Tern host it runs on |
+
+Exit 0 to open the session. On failure, Tern shows the output and offers
+**Retry setup** or **Open workspace anyway**. The worktree is kept either way.
+
+Hooks inherit the Tern daemon's `PATH`, which can be shorter than your login
+shell's. If a tool isn't found, look it up through `$SHELL -lic`; the uv
+example shows how.
+
+**Run Setup** (in the panel or the palette) reruns an existing worktree's own
+setup in place, asking the questions again. Setup never reruns on its own, and
+it doesn't change shells that are already open.
+
+### `shell`: the shell hook
+
+Sourced, not executed, in every new shell in the worktree, before the pane's
+command. That includes the configured panes, `Cmd+T` tabs and ordinary
+splits. `WORKTREE_SESSION_PATH` is set to the worktree root. It must use POSIX
+shell syntax (zsh, bash, sh, ksh, dash and ash work). If it fails, the error
+stays visible and that pane's command doesn't start.
+
+It is read from each worktree, not from the checkout you created it from. Commit
+it so new branches have it, or have `setup` write it. Shells already open keep
+the environment they started with.
+
+### Working with a team
+
+Nothing here affects people who don't use the plugin. A plain `git worktree
+add` runs no hooks, and a repository without these files works fine in Tern.
+
+If the setup is only for you, keep the files out of Git. List `.tern/` in
+`.git/info/exclude`, which is never committed. The setup files are read from
+your current checkout, so untracked ones still work. The shell hook needs to
+exist in each new worktree, so have `setup` copy it:
+
+```sh
+mkdir -p .tern/worktree-sessions
+cp "$WORKTREE_SESSION_SETUP_SOURCE/.tern/worktree-sessions/shell" .tern/worktree-sessions/
+```
+
+## The panel
+
+| Action | Button | Key |
+| --- | --- | --- |
+| Switch to a worktree | click its row | |
+| New worktree | **+ New Worktree** | `n` |
+| Remove a worktree | **− Remove Worktree** | `d`, then `1`–`9` to pick |
+| Rerun setup | **Run Setup** | |
+| Refresh | **↻ Refresh** | `r` |
+| Push and open a PR, or open the existing one | the PR button on a row | |
+
+Removal runs `git worktree remove` without force, so a dirty or locked worktree
+stays put and Git's error is shown. After a removal, its session and programs
+are closed. The branch is kept. The primary worktree can't be removed here.
+
+PR status uses the `gh` CLI, if it's installed and signed in.
+
+Palette commands: **Discover**, **Switch**, **New Worktree**, **Remove
+Worktree**, **Run Setup**, **Refresh**, **Edit Config**, and **Open \<name\>
+Tab** for each configured tab, all prefixed with **Worktree Sessions:**.
+
+## Details
+
+- A Tern window belongs to one repository once you pick a worktree in it, and
+  its title becomes the repository name.
+- Sessions are named from the Git common directory and the worktree path, so
+  renaming a branch keeps its session.
+- If a configured tab is closed, **Open \<name\> Tab** recreates it. Opening a
+  one-pane tab whose program exited, such as `git`, starts the command again.
+- **Remote hosts:** the panel runs Git on the host of the pane you opened it
+  from. The plugin must be installed there. The layout comes from the machine
+  running the Tern window. `setup_hook` is read on the worktree's host, so if
+  you change it, set it in `config.json` on both machines.
+
+## Troubleshooting
+
+- **No panel, or no palette commands:** check `tern plugin list`. If it shows
+  an error, run `tern plugin reload worktree-sessions` after fixing it.
+- **My config change did nothing:** reload the plugin. Existing tabs keep their
+  layout; the change applies to new worktree sessions and recreated tabs.
+- **A command isn't found in a pane, or in setup:** panes use your login shell,
+  but setup hooks use the daemon's `PATH`. See [the setup hook](#setup-the-setup-hook).
+- **fish, nushell or PowerShell:** the shell hook needs a POSIX shell. Panes
+  still run their commands, without the hook.
+
+Tested with Tern 0.9.10.
+
+## License
+
+[MIT](LICENSE)
