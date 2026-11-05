@@ -5,8 +5,6 @@ worktree its own persistent session: the tabs and programs you work with,
 already open in that worktree, a click away. New worktrees can run the repository's own
 setup, with questions asked in Tern, before anything opens.
 
-<!-- TODO: screenshot or GIF of the panel and a switch between worktrees -->
-
 - **One session per worktree.** Switching hides the other worktrees' tabs
   without stopping their programs. Your editor buffers and agent runs are where
   you left them.
@@ -84,11 +82,11 @@ The defaults:
 
 | Key | Meaning |
 | --- | --- |
-| `panel_ratio` | Width of the worktree panel, as a share of the tab (0.1 to 0.9). |
+| `panel_ratio` | Width of the worktree panel, as a share of the tab: more than 0.1 and less than 0.9. |
 | `tabs` | The tabs each new worktree session gets, in order. |
 | `tabs[].name` | Tab name: letters, digits, `-` or `_`, up to 32. Each gets an **Open \<name\> Tab** command, so names that differ only in case, `-` or `_` aren't allowed together. |
 | `tabs[].split` | `"right"` (side by side) or `"down"` (stacked). Default `"right"`. |
-| `tabs[].ratio` | The first pane's share. Later panes split the rest evenly. Default: all panes equal. |
+| `tabs[].ratio` | The first pane's share, more than 0.1 and less than 0.9. Later panes split the rest evenly. Default: all panes equal. |
 | `tabs[].pin` | Optional. `"right"` keeps the tab at the right edge: new `Cmd+T` tabs open before it. Tabs aren't pinned unless you set this. |
 | `tabs[].panes` | 1 to 6 panes. A pane's `command` runs in an interactive login shell. A pane without one is a plain shell. |
 | `setup_hook`, `shell_hook` | Where repositories keep their [setup files](#repository-setup), relative to the repository root. |
@@ -99,7 +97,7 @@ command exits or is missing, you are left at a shell prompt in that pane. A
 malformed file doesn't break the plugin: it uses the defaults and shows the
 error when you open the panel.
 
-### Example: the author's config
+### Example: nvim, agents and lazygit
 
 Three tabs: nvim above a terminal, two spare shells for agents, and lazygit
 pinned to the right. Only `tabs` is set, so the panel
@@ -223,6 +221,10 @@ cp path/to/tern-worktree-sessions/examples/uv-venv/* .tern/worktree-sessions/
 
 **+ New Worktree** now asks how to set up the environment, runs `uv sync` or
 links the venv, and opens the tabs with the venv active in every shell.
+
+If you offer the shared option, list `.venv` in `.gitignore` without a
+trailing slash. `.venv/` matches only directories, so the symlink would show
+as an untracked file and Git would refuse to remove that worktree.
 
 ### `setup.json`: questions
 
@@ -351,6 +353,10 @@ Tab** for each configured tab, all prefixed with **Worktree Sessions:**.
   but setup hooks use the daemon's `PATH`. See [the setup hook](#setup-the-setup-hook).
 - **fish, nushell or PowerShell:** the shell hook needs a POSIX shell. Panes
   still run their commands, without the hook.
+- **"GitHub PR status unavailable":** the plugin needs the `gh` CLI, found in
+  `/opt/homebrew/bin`, `/usr/bin` or the daemon's `PATH`, and signed in
+  (`gh auth status`). The plugin looks for it when it loads, so after
+  installing `gh`, run `tern plugin reload worktree-sessions`.
 
 Tested with Tern 0.9.10.
 
