@@ -16,10 +16,7 @@ local M = {}
 M.DEFAULTS = {
 	panel_ratio = 0.22,
 	tabs = {
-		{ name = "editor", split = "down", ratio = 0.65,
-			panes = { { command = "nvim" }, { command = "codex" } } },
-		{ name = "agents", split = "right", ratio = 0.5, panes = { {}, {} } },
-		{ name = "git", pin = "right", panes = { { command = "lazygit" } } },
+		{ name = "shell", panes = { {} } },
 	},
 	setup_hook = ".tern/worktree-sessions/setup",
 	shell_hook = ".tern/worktree-sessions/shell",
@@ -148,12 +145,7 @@ M.TEMPLATE = [[
 {
   "panel_ratio": 0.22,
   "tabs": [
-    { "name": "editor", "split": "down", "ratio": 0.65,
-      "panes": [ { "command": "nvim" }, { "command": "codex" } ] },
-    { "name": "agents", "split": "right", "ratio": 0.5,
-      "panes": [ {}, {} ] },
-    { "name": "git", "pin": "right",
-      "panes": [ { "command": "lazygit" } ] }
+    { "name": "shell", "panes": [ {} ] }
   ],
   "setup_hook": ".tern/worktree-sessions/setup",
   "shell_hook": ".tern/worktree-sessions/shell"

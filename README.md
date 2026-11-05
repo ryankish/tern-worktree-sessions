@@ -1,18 +1,18 @@
 # Worktree Sessions
 
 A [Tern](https://stencil.so/tern) plugin that gives every Git
-worktree its own persistent session: your editor, agents and Git UI, already
-open in that worktree, a click away. New worktrees can run the repository's own
+worktree its own persistent session: the tabs and programs you work with,
+already open in that worktree, a click away. New worktrees can run the repository's own
 setup, with questions asked in Tern, before anything opens.
 
 <!-- TODO: screenshot or GIF of the panel and a switch between worktrees -->
 
 - **One session per worktree.** Switching hides the other worktrees' tabs
-  without stopping their programs. Your nvim buffers and agent runs are where
+  without stopping their programs. Your editor buffers and agent runs are where
   you left them.
 - **Your layout, not ours.** Tabs, panes and commands come from a small JSON
-  file that survives plugin updates. The defaults are nvim + Codex, two spare
-  shells, and lazygit.
+  file that survives plugin updates. Out of the box a session is one plain
+  shell; you decide what else it opens.
 - **Create and remove worktrees in place.** Type a branch name and get a ready
   session; removal refuses dirty worktrees.
 - **Optional per-repo setup.** A repository can ask questions ("share the venv
@@ -44,17 +44,16 @@ No configuration is needed.
 
 1. In any pane inside a Git repository, run **Worktree Sessions: Discover**
    from the command palette. A worktree panel opens on the left.
-2. Click a worktree. Its session opens with three tabs:
-   - `editor`: nvim above `codex`
-   - `agents`: two shells
-   - `git`: lazygit, always the rightmost tab
+2. Click a worktree. Its session opens with one `shell` tab in that worktree.
+   [Configure your layout](#configure-your-layout) to open your editor, agents
+   or Git UI there instead.
 3. Press **+ New Worktree** (or `n` in the panel), type a branch name, and
    press Enter. An existing branch is checked out; a new branch starts at the
    current worktree's HEAD. Worktrees go in a sibling `<repo>-worktrees/`
    directory.
 
 `Cmd+T` in a worktree session opens a shell tab in that worktree, placed before
-`git`. Every tab gets the panel on its left.
+any [pinned](#configure-your-layout) tab. Every tab gets the panel on its left.
 
 ## Configure your layout
 
@@ -76,12 +75,7 @@ The defaults:
 {
   "panel_ratio": 0.22,
   "tabs": [
-    { "name": "editor", "split": "down", "ratio": 0.65,
-      "panes": [ { "command": "nvim" }, { "command": "codex" } ] },
-    { "name": "agents", "split": "right", "ratio": 0.5,
-      "panes": [ {}, {} ] },
-    { "name": "git", "pin": "right",
-      "panes": [ { "command": "lazygit" } ] }
+    { "name": "shell", "panes": [ {} ] }
   ],
   "setup_hook": ".tern/worktree-sessions/setup",
   "shell_hook": ".tern/worktree-sessions/shell"
@@ -95,25 +89,27 @@ The defaults:
 | `tabs[].name` | Tab name: letters, digits, `-` or `_`. Each gets an **Open \<name\> Tab** command. |
 | `tabs[].split` | `"right"` (side by side) or `"down"` (stacked). Default `"right"`. |
 | `tabs[].ratio` | The first pane's share. Later panes split the rest evenly. Default: all panes equal. |
-| `tabs[].pin` | `"right"` keeps the tab at the right edge, even after `Cmd+T`. |
+| `tabs[].pin` | Optional. `"right"` keeps the tab at the right edge: new `Cmd+T` tabs open before it. Tabs aren't pinned unless you set this. |
 | `tabs[].panes` | 1 to 6 panes. A pane's `command` runs in an interactive login shell. A pane without one is a plain shell. |
 | `setup_hook`, `shell_hook` | Where repositories keep their [setup files](#repository-setup), relative to the repository root. |
 
-Commands run in a login shell, so shell aliases and functions work. If a
+Commands run in a login shell, so shell aliases, functions and variables such
+as `$EDITOR` work. For example, `"command": "$EDITOR"`. If a
 command exits or is missing, you are left at a shell prompt in that pane. A
 malformed file doesn't break the plugin: it uses the defaults and shows the
 error when you open the panel.
 
 ### Example: the author's config
 
-The defaults with one change: the agent pane under nvim runs `codex`. Only
-`tabs` is set, so the panel width and hook paths keep their defaults.
+Three tabs: nvim above a terminal, two spare shells for agents, and lazygit
+pinned to the right. Only `tabs` is set, so the panel
+width and hook paths keep their defaults.
 
 ```json
 {
   "tabs": [
     { "name": "editor", "split": "down", "ratio": 0.65,
-      "panes": [ { "command": "nvim" }, { "command": "codex" } ] },
+      "panes": [ { "command": "nvim" }, {} ] },
     { "name": "agents", "split": "right", "ratio": 0.5,
       "panes": [ {}, {} ] },
     { "name": "git", "pin": "right",
@@ -337,7 +333,8 @@ Tab** for each configured tab, all prefixed with **Worktree Sessions:**.
 - Sessions are named from the Git common directory and the worktree path, so
   renaming a branch keeps its session.
 - If a configured tab is closed, **Open \<name\> Tab** recreates it. Opening a
-  one-pane tab whose program exited, such as `git`, starts the command again.
+  one-pane tab whose program exited, such as a lazygit tab, starts the command
+  again.
 - **Remote hosts:** the panel runs Git on the host of the pane you opened it
   from. The plugin must be installed there. The layout comes from the machine
   running the Tern window. `setup_hook` is read on the worktree's host, so if
