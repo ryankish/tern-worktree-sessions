@@ -2,6 +2,18 @@
 
 A Tern plugin for Git worktree navigation and persistent workspace sessions.
 
+## Install
+
+Clone this repository as the `worktree` directory in Tern's plugin directory
+(`tern plugin dir` prints it), then reload plugins:
+
+```sh
+git clone https://github.com/ryankish/tern-worktree-sessions.git "$(tern plugin dir)/worktree"
+tern plugin reload
+```
+
+## Usage
+
 In a Git pane, run **Worktree: Discover** from the
 command palette. It opens a persistent worktree panel to the left of the
 focused pane, on that pane's Tern host and in its current working directory.
