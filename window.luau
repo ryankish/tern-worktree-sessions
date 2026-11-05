@@ -116,17 +116,18 @@ local function normalize_ratios(cx, tab, nav)
 		end
 		return nil
 	end
-	if not set_share(cx, nav, "right", 0.22, root_share) then return end
-	if tab.name == "editor" then
+	if not set_share(cx, nav, "right", config.panel_ratio, root_share) then return end
+	local tab_config = config.tab(tab.name)
+	if tab_config and #tab_config.panes > 1 then
 		local layout = cx.session:layout(tab.id)
 		local content = layout and layout.root[2]
-		if content and content.split == "down" and content[1] and content[1].pane then
-			local function editor_share()
+		if content and content.split == tab_config.split and content[1] and content[1].pane then
+			local function first_share()
 				local current = cx.session:layout(tab.id)
 				local right = current and current.root[2]
 				return right and right.ratio or nil
 			end
-		if not set_share(cx, content[1].pane, "down", config.editor_split_ratio, editor_share) then return end
+			if not set_share(cx, content[1].pane, tab_config.split, tab_config.ratio, first_share) then return end
 		end
 	end
 	tern.kv.set(key, true)
@@ -172,9 +173,11 @@ local function ensure_inventories(cx, session_id, path)
 					and layout.root[1] and layout.root[1].pane == nav
 				if not at_left and content[1] then
 					cx.layout:move(nav, content[1], "left", { focus = false })
-					if content[2] and (tab.name == "editor" or tab.name == "agents") then
-						cx.layout:move(content[2], content[1],
-							tab.name == "editor" and "down" or "right", { focus = false })
+					local tab_config = config.tab(tab.name)
+					if tab_config and #tab_config.panes == #content then
+						for i = 2, #content do
+							cx.layout:move(content[i], content[i - 1], tab_config.split, { focus = false })
+						end
 					end
 				end
 				normalize_ratios(cx, tab, nav)
@@ -190,7 +193,13 @@ local function set_repo(repo)
 	end
 end
 
+local config_error_shown = false
+
 local function open_inventory(cx, intent)
+	if config.error and not config_error_shown then
+		config_error_shown = true
+		cx:toast("error", "Worktree Sessions config.json has a problem", config.error)
+	end
 	local pane = cx.session:focused()
 	local info = pane and cx.session:pane(pane)
 	local host = cx.hosts:current()
@@ -227,18 +236,26 @@ local function named_tab(cx, session_id, name)
 	return nil
 end
 
-local function keep_git_last(cx, session_id)
-	local git_tab, count, position = nil, 0, nil
+-- Tabs with pin = "right" stay at the right edge, in config order.
+local function keep_pinned_last(cx, session_id)
+	local by_name, count = {}, 0
 	for _, tab in cx.session:tabs() do
 		if tab.session == session_id then
 			count += 1
-			if tab.name == "git" then
-				git_tab = tab.id
-				position = tab.position
-			end
+			by_name[tab.name or ""] = tab
 		end
 	end
-	if git_tab and position ~= count then cx.layout:order_tab(git_tab, count) end
+	local pinned = {}
+	for _, tab_config in config.tabs do
+		local tab = tab_config.pin == "right" and by_name[tab_config.name]
+		if tab then table.insert(pinned, tab) end
+	end
+	local in_place = true
+	for i, tab in pinned do
+		if tab.position ~= count - #pinned + i then in_place = false end
+	end
+	if in_place then return end
+	for _, tab in pinned do cx.layout:order_tab(tab.id, count) end
 end
 
 local function create_tab(cx, session_id, name, spec)
@@ -263,87 +280,67 @@ local function create_tab(cx, session_id, name, spec)
 	return tab, true
 end
 
+-- Builds the configured panes along one split, the first taking `ratio`.
+local function pane_spec(path, count, split, ratio, i)
+	if i == count then return { launch = { cwd = path } } end
+	return {
+		split = split,
+		ratio = i == 1 and ratio or 1 / (count - i + 1),
+		[1] = { launch = { cwd = path } },
+		[2] = pane_spec(path, count, split, ratio, i + 1),
+	}
+end
+
 local function initialize(cx, session, path, starter)
 	local host = cx.hosts:current()
 	if host.state ~= "connected" then return end
-	local host_name = host.name
-
-	local editor, new_editor = create_tab(cx, session.id, "editor", {
-		name = "editor", cwd = path, split = "right", ratio = 0.22,
-		[1] = { launch = inventory_launch(path, host_name, host.kind) },
-		[2] = { split = "down", ratio = config.editor_split_ratio,
-			[1] = { launch = { cwd = path } },
-			[2] = { launch = { cwd = path } },
-		},
-	})
-	if not editor then return end
-	if new_editor then
-		-- Type into login shells so aliases work and failed commands leave a prompt.
-		local tree = cx.session:layout(editor)
-		local content = tree and tree.root[2]
-		if content and content[1] and content[1].pane and content[2] and content[2].pane then
-			start_shell(cx, content[1].pane, path, config.editor_command)
-			start_shell(cx, content[2].pane, path, config.agent_command)
-		else
-			cx:toast("error", "Could not start editor commands", "Editor pane layout is unavailable")
+	local first_tab = nil
+	for _, tab_config in config.tabs do
+		local tab, created = create_tab(cx, session.id, tab_config.name, {
+			name = tab_config.name, cwd = path, split = "right", ratio = config.panel_ratio,
+			[1] = { launch = inventory_launch(path, host.name, host.kind) },
+			[2] = pane_spec(path, #tab_config.panes, tab_config.split, tab_config.ratio, 1),
+		})
+		if not tab then return end
+		if not tab_config.pin then first_tab = first_tab or tab end
+		if created then
+			-- Type into login shells so aliases work and failed commands leave a prompt.
+			local tree = cx.session:layout(tab)
+			local content = {}
+			if tree and tree.root[2] then leaves(tree.root[2], content) end
+			if #content == #tab_config.panes then
+				for i, pane in content do start_shell(cx, pane, path, tab_config.panes[i].command) end
+			else
+				cx:toast("error", "Could not start " .. tab_config.name .. " commands", "Pane layout is unavailable")
+			end
 		end
 	end
-	local agents, new_agents = create_tab(cx, session.id, "agents", {
-		name = "agents", cwd = path, split = "right", ratio = 0.22,
-		[1] = { launch = inventory_launch(path, host_name, host.kind) },
-		[2] = { split = "right", ratio = config.agents_split_ratio,
-			[1] = { launch = { cwd = path } },
-			[2] = { launch = { cwd = path } },
-		},
-	})
-	if not agents then return end
-	if new_agents then
-		local tree = cx.session:layout(agents)
-		local content = tree and tree.root[2]
-		if content and content[1] and content[1].pane and content[2] and content[2].pane then
-			start_shell(cx, content[1].pane, path)
-			start_shell(cx, content[2].pane, path)
-		end
-	end
-	local git_tab, new_git = create_tab(cx, session.id, "git", {
-		name = "git", cwd = path, split = "right", ratio = 0.22,
-		[1] = { launch = inventory_launch(path, host_name, host.kind) },
-		[2] = { launch = { cwd = path } },
-	})
-	if not git_tab then return end
-	if new_git then
-		local tree = cx.session:layout(git_tab)
-		if tree and tree.root[2] and tree.root[2].pane then
-			start_shell(cx, tree.root[2].pane, path, config.git_command)
-		else
-			cx:toast("error", "Could not start lazygit", "Git pane layout is unavailable")
-		end
-	end
-	if starter then cx.layout:close(starter) end
 	if starter then
-		local layout = cx.session:layout(editor)
+		cx.layout:close(starter)
+		local layout = first_tab and cx.session:layout(first_tab)
 		if layout then cx.layout:focus(layout.focus) end
 	end
-	keep_git_last(cx, session.id)
+	keep_pinned_last(cx, session.id)
 end
 
 local function ensure_initialized(cx, session, path, starter)
 	if initialized_sessions[session.id] then return end
 	initialize(cx, session, path, starter)
-	if named_tab(cx, session.id, "editor") and named_tab(cx, session.id, "agents")
-		and named_tab(cx, session.id, "git") then
-		initialized_sessions[session.id] = true
+	for _, tab_config in config.tabs do
+		if not named_tab(cx, session.id, tab_config.name) then return end
 	end
+	initialized_sessions[session.id] = true
 end
 
-local function restore_git_pane(cx, session, tab, path)
+-- Reopens the command of a one-pane tab whose program exited.
+local function restore_command_pane(cx, session, tab, path, command)
 	local nav, exited = nil, {}
 	for _, item in cx.session:panes() do
 		if item.tab == tab then
 			if item.block == "worktree-sessions.inventory" then
 				nav = item.pane
 			elseif not item.exited then
-				-- A live shell may be running something other than lazygit; preserve it.
+				-- A live shell may be running something else; preserve it.
 				return item.pane
 			else
 				table.insert(exited, item.pane)
@@ -357,16 +354,16 @@ local function restore_git_pane(cx, session, tab, path)
 		end
 	end
 	if not nav then
-		cx:toast("error", "Cannot restore Git pane", "Worktree inventory pane is unavailable")
+		cx:toast("error", "Cannot restore pane", "Worktree inventory pane is unavailable")
 		return nil
 	end
 	for _, pane in exited do cx.layout:close(pane) end
 	local pane = cx.layout:split(nav, "right", { cwd = path }, { focus = false })
 	if not pane then
-		cx:toast("error", "Cannot restore Git pane")
+		cx:toast("error", "Cannot restore pane")
 		return nil
 	end
-	start_shell(cx, pane, path, config.git_command)
+	start_shell(cx, pane, path, command)
 	local function nav_share()
 		local layout = cx.session:layout(tab)
 		local root = layout and layout.root
@@ -375,8 +372,8 @@ local function restore_git_pane(cx, session, tab, path)
 		end
 		return nil
 	end
-	set_share(cx, nav, "right", 0.22, nav_share)
-	keep_git_last(cx, session.id)
+	set_share(cx, nav, "right", config.panel_ratio, nav_share)
+	keep_pinned_last(cx, session.id)
 	return pane
 end
 
@@ -402,8 +399,9 @@ local function open_managed_tab(cx, name)
 	ensure_inventories(cx, session.id, identity.path)
 	local layout = cx.session:layout(tab)
 	local pane = layout and layout.focus
-	if name == "git" then
-		pane = restore_git_pane(cx, session, tab, identity.path) or pane
+	local tab_config = config.tab(name)
+	if tab_config and #tab_config.panes == 1 and tab_config.panes[1].command then
+		pane = restore_command_pane(cx, session, tab, identity.path, tab_config.panes[1].command) or pane
 	elseif not existed then
 		for _, item in cx.session:panes() do
 			if item.tab == tab and item.block ~= "worktree-sessions.inventory" then
@@ -433,7 +431,7 @@ local function new_worktree_shell(cx)
 		return true
 	end
 	start_shell(cx, opened, identity.path)
-	keep_git_last(cx, session.id)
+	keep_pinned_last(cx, session.id)
 	ensure_inventories(cx, session.id, identity.path)
 	return true
 end
@@ -482,12 +480,29 @@ end })
 tern.command({ id = "run_setup", title = "Worktree Sessions: Run Setup", icon = "play", run = function(cx)
 	open_inventory(cx, "setup")
 end })
-tern.command({ id = "open_editor", title = "Worktree Sessions: Open Editor Tab", icon = "file",
-	run = function(cx) open_managed_tab(cx, "editor") end })
-tern.command({ id = "open_agents", title = "Worktree Sessions: Open Agents Tab", icon = "terminal",
-	run = function(cx) open_managed_tab(cx, "agents") end })
-tern.command({ id = "open_git", title = "Worktree Sessions: Open Git Tab", icon = "branch",
-	run = function(cx) open_managed_tab(cx, "git") end })
+
+-- One "Open <name> Tab" command per configured tab.
+local command_ids = {}
+for _, tab_config in config.tabs do
+	local id = "open_tab_" .. string.lower((string.gsub(tab_config.name, "-", "_")))
+	if not command_ids[id] then
+		command_ids[id] = true
+		local name = tab_config.name
+		tern.command({ id = id, title = "Worktree Sessions: Open " .. name .. " Tab", icon = "terminal",
+			run = function(cx) open_managed_tab(cx, name) end })
+	end
+end
+
+tern.command({ id = "edit_config", title = "Worktree Sessions: Edit Config", icon = "file",
+	run = function(cx)
+		if not tern.fs.exists(config.path) then
+			tern.fs.mkdir(tern.plugin.data)
+			tern.fs.write(config.path, config.TEMPLATE)
+		end
+		cx:open(config.path, "tab")
+		cx:toast("success", "Editing Worktree Sessions config",
+			"Save, then run: tern plugin reload worktree-sessions")
+	end })
 tern.override("new_tab", new_worktree_shell)
 
 local function refresh_repo_inventories(cx, common_dir, source_pane, visible_session, force_pr)
@@ -745,7 +760,7 @@ end)
 tern.on("tab_created", function(ev, cx)
 	for _, tab in cx.session:tabs() do
 		if tab.id == ev.tab then
-			if tab.name ~= "editor" and tab.name ~= "agents" and tab.name ~= "git" then
+			if not config.tab(tab.name) then
 				show_current_repo(cx)
 			end
 			return
