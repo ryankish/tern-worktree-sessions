@@ -54,7 +54,7 @@ end
 
 local function check_tabs(tabs)
 	if type(tabs) ~= "table" or #tabs == 0 then fail("tabs must be a nonempty list") end
-	local out, seen = {}, {}
+	local out, seen, command_ids = {}, {}, {}
 	for i, tab in tabs do
 		local where = "tabs[" .. i .. "]"
 		if type(tab) ~= "table" then fail(where .. " must be an object") end
@@ -69,6 +69,13 @@ local function check_tabs(tabs)
 		end
 		if seen[name] then fail("tab name " .. name .. " is used twice") end
 		seen[name] = true
+		-- Each tab gets an "Open <name> Tab" command; names must not share an id.
+		local command_id = "open_tab_" .. string.lower((string.gsub(name, "-", "_")))
+		if command_ids[command_id] then
+			fail("tab names " .. command_ids[command_id] .. " and " .. name
+				.. " would share the command " .. command_id)
+		end
+		command_ids[command_id] = name
 		where = "tab " .. name
 		local split = tab.split or "right"
 		if split ~= "right" and split ~= "down" then fail(where .. ": split must be \"right\" or \"down\"") end
@@ -91,6 +98,7 @@ local function check_tabs(tabs)
 			split = split,
 			ratio = check_ratio(tab.ratio, where .. " ratio") or 1 / #clean,
 			pin = tab.pin,
+			command_id = command_id,
 			panes = clean,
 		})
 	end

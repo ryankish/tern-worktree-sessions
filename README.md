@@ -86,7 +86,7 @@ The defaults:
 | --- | --- |
 | `panel_ratio` | Width of the worktree panel, as a share of the tab (0.1 to 0.9). |
 | `tabs` | The tabs each new worktree session gets, in order. |
-| `tabs[].name` | Tab name: letters, digits, `-` or `_`. Each gets an **Open \<name\> Tab** command. |
+| `tabs[].name` | Tab name: letters, digits, `-` or `_`, up to 32. Each gets an **Open \<name\> Tab** command, so names that differ only in case, `-` or `_` aren't allowed together. |
 | `tabs[].split` | `"right"` (side by side) or `"down"` (stacked). Default `"right"`. |
 | `tabs[].ratio` | The first pane's share. Later panes split the rest evenly. Default: all panes equal. |
 | `tabs[].pin` | Optional. `"right"` keeps the tab at the right edge: new `Cmd+T` tabs open before it. Tabs aren't pinned unless you set this. |

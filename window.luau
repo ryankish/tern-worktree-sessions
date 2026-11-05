@@ -431,15 +431,10 @@ tern.command({ id = "run_setup", title = "Worktree Sessions: Run Setup", icon = 
 end })
 
 -- One "Open <name> Tab" command per configured tab.
-local command_ids = {}
 for _, tab_config in config.tabs do
-	local id = "open_tab_" .. string.lower((string.gsub(tab_config.name, "-", "_")))
-	if not command_ids[id] then
-		command_ids[id] = true
-		local name = tab_config.name
-		tern.command({ id = id, title = "Worktree Sessions: Open " .. name .. " Tab", icon = "terminal",
-			run = function(cx) open_managed_tab(cx, name) end })
-	end
+	local name = tab_config.name
+	tern.command({ id = tab_config.command_id, title = "Worktree Sessions: Open " .. name .. " Tab",
+		icon = "terminal", run = function(cx) open_managed_tab(cx, name) end })
 end
 
 tern.command({ id = "edit_config", title = "Worktree Sessions: Edit Config", icon = "file",

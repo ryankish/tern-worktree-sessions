@@ -225,12 +225,22 @@ test("config: no file gives the defaults", function()
 	eq(config.panel_ratio, 0.22, "panel ratio")
 	eq(config.setup_hook, ".tern/worktree-sessions/setup", "setup hook")
 	eq(config.tab("shell").name, "shell", "tab lookup")
+	eq(config.tab("shell").command_id, "open_tab_shell", "command id")
 	eq(config.tab("missing"), nil, "unknown tab")
 end)
 
 test("config: the Edit Config template equals the defaults", function()
 	assert(deep_eq(config.build(serde.decode("json", config.TEMPLATE)), config.build({})),
 		"TEMPLATE and DEFAULTS differ")
+end)
+
+test("config: tab names that would share a command are rejected", function()
+	for _, pair in { { "a-b", "a_b" }, { "Git", "git" } } do
+		fails_with(function()
+			config.build({ tabs = { { name = pair[1] }, { name = pair[2] } } })
+		end, "would share the command")
+	end
+	eq(#config.build({ tabs = { { name = "a-b" }, { name = "a-c" } } }).tabs, 2, "distinct names pass")
 end)
 
 test("config: user keys replace defaults, others are kept", function()
