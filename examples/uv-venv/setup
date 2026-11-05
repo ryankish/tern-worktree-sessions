@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""Worktree Sessions setup hook for a uv project.
+
+Runs once, in the new worktree, after `git worktree add`.
+Arguments: primary-checkout new-worktree-path branch
+The answers to setup.json arrive in WORKTREE_SESSION_SETUP_CHOICES_JSON.
+"""
+
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+
+def find_uv() -> str:
+    direct = shutil.which("uv")
+    if direct:
+        return direct
+    # Hooks inherit Tern's daemon PATH, which can be shorter than your
+    # login shell's PATH. Ask the login shell where uv is.
+    shell = os.environ.get("SHELL", "/bin/sh")
+    result = subprocess.run([shell, "-lic", "command -v uv"],
+                            capture_output=True, text=True)
+    for line in reversed(result.stdout.splitlines()):
+        candidate = Path(line.strip())
+        if candidate.is_absolute() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    raise SystemExit("uv is not on this host's PATH")
+
+
+def main() -> None:
+    primary, path, _branch = sys.argv[1:4]
+    worktree = Path(path)
+    choices = json.loads(os.environ["WORKTREE_SESSION_SETUP_CHOICES_JSON"])
+    venv = worktree / ".venv"
+
+    if choices.get("environment") == "shared":
+        shared = Path(primary) / ".venv"
+        if not (shared / "bin/python").is_file():
+            raise SystemExit("the primary checkout has no .venv; run uv sync there first")
+        if (worktree / "uv.lock").read_bytes() != (Path(primary) / "uv.lock").read_bytes():
+            raise SystemExit("uv.lock differs from the primary checkout; choose an independent venv")
+        if not venv.exists():
+            venv.symlink_to(shared, target_is_directory=True)
+    else:
+        subprocess.run([find_uv(), "sync", "--locked"], cwd=worktree, check=True)
+
+    # Fail now, with output in Tern, rather than in the first shell.
+    subprocess.run([str(venv / "bin/python"), "-c", "import sys; print(sys.prefix)"], check=True)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,7 @@
+# Worktree Sessions shell hook: sourced by each new shell in a worktree.
+# Keep it fast and quiet. It must use POSIX shell syntax.
+if [ ! -f "$WORKTREE_SESSION_PATH/.venv/bin/activate" ]; then
+  printf 'no .venv in %s; run Worktree Sessions: Run Setup\n' "$WORKTREE_SESSION_PATH" >&2
+  return 1
+fi
+. "$WORKTREE_SESSION_PATH/.venv/bin/activate"

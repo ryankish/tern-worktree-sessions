@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "questions": [
+    {
+      "id": "environment",
+      "label": "How should this worktree use the uv environment?",
+      "default": "independent",
+      "choices": [
+        {
+          "id": "independent",
+          "label": "Independent venv",
+          "description": "Run uv sync and create this worktree's own .venv."
+        },
+        {
+          "id": "shared",
+          "label": "Share the primary checkout's venv",
+          "description": "Link to its .venv; package changes affect both worktrees."
+        }
+      ]
+    }
+  ]
+}
