@@ -243,7 +243,8 @@ end
 local function initialize(cx, session, path, starter)
 	local host = cx.hosts:current()
 	if host.state ~= "connected" then return end
-	local first_tab = nil
+	-- After the starter pane closes, focus the first tab that isn't pinned.
+	local focus_tab, pinned_tab = nil, nil
 	for _, tab_config in config.tabs do
 		local tab, created = create_tab(cx, session.id, tab_config.name, {
 			name = tab_config.name, cwd = path, split = "right", ratio = config.panel_ratio,
@@ -251,7 +252,7 @@ local function initialize(cx, session, path, starter)
 			[2] = pane_spec(path, #tab_config.panes, tab_config.split, tab_config.ratio, 1),
 		})
 		if not tab then return end
-		if not tab_config.pin then first_tab = first_tab or tab end
+		if tab_config.pin then pinned_tab = pinned_tab or tab else focus_tab = focus_tab or tab end
 		if created then
 			-- Type into login shells so aliases work and failed commands leave a prompt.
 			local tree = cx.session:layout(tab)
@@ -266,7 +267,8 @@ local function initialize(cx, session, path, starter)
 	end
 	if starter then
 		cx.layout:close(starter)
-		local layout = first_tab and cx.session:layout(first_tab)
+		local focus = focus_tab or pinned_tab
+		local layout = focus and cx.session:layout(focus)
 		if layout then cx.layout:focus(layout.focus) end
 	end
 	keep_pinned_last(cx, session.id)
