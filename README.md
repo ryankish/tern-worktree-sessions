@@ -200,6 +200,21 @@ export RESULTS_DIR="$HOME/results/$(basename "$WORKTREE_SESSION_PATH")"
 mkdir -p "$RESULTS_DIR"
 ```
 
+### Let an agent write it
+
+The plugin includes an agent skill,
+[`worktree-sessions-setup`](skills/worktree-sessions-setup/SKILL.md), that
+teaches Claude Code, Codex and omp how to write these files for a repository:
+what to look for, what to ask you, the hook contract, and how to test the
+result. Link it where your agents look for skills (omp reads both folders):
+
+```sh
+ln -s "$(tern plugin dir)/worktree-sessions/skills/worktree-sessions-setup" ~/.claude/skills/
+ln -s "$(tern plugin dir)/worktree-sessions/skills/worktree-sessions-setup" ~/.codex/skills/
+```
+
+Then ask your agent to "set up Worktree Sessions for this repo".
+
 ### Example: uv, with a shared or independent venv
 
 [`examples/uv-venv`](examples/uv-venv) has all three files. Copy them into

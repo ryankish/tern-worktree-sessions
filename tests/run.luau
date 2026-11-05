@@ -395,7 +395,7 @@ end)
 
 -- Documentation: every example config and question file must be valid.
 
-test("docs: README and example JSON pass the real validators", function()
+test("docs: README, skill and example JSON pass the real validators", function()
 	local readme = fs.readFile(ROOT .. "/README.md")
 	local configs, policies = 0, 0
 	for block in string.gmatch(readme, "```json\n(.-)```") do
@@ -411,6 +411,13 @@ test("docs: README and example JSON pass the real validators", function()
 	assert(configs >= 3, "expected at least 3 config examples in README, found " .. configs)
 	assert(policies >= 1, "expected a setup.json example in README")
 	assert(policy.parse(fs.readFile(ROOT .. "/examples/uv-venv/setup.json")))
+	local skill = fs.readFile(ROOT .. "/skills/worktree-sessions-setup/SKILL.md")
+	local skill_policies = 0
+	for block in string.gmatch(skill, "```json\n(.-)```") do
+		assert(policy.parse(block))
+		skill_policies += 1
+	end
+	assert(skill_policies >= 1, "expected a setup.json example in the skill")
 end)
 
 if fs.isDir(TMP) then fs.removeDir(TMP) end
