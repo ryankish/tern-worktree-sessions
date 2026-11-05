@@ -229,11 +229,6 @@ test("config: no file gives the defaults", function()
 	eq(config.tab("missing"), nil, "unknown tab")
 end)
 
-test("config: the Edit Config template equals the defaults", function()
-	assert(deep_eq(config.build(serde.decode("json", config.TEMPLATE)), config.build({})),
-		"TEMPLATE and DEFAULTS differ")
-end)
-
 test("config: tab names that would share a command are rejected", function()
 	for _, pair in { { "a-b", "a_b" }, { "Git", "git" } } do
 		fails_with(function()

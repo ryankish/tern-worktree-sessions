@@ -13,14 +13,18 @@
 
 local M = {}
 
-M.DEFAULTS = {
-	panel_ratio = 0.22,
-	tabs = {
-		{ name = "shell", panes = { {} } },
-	},
-	setup_hook = ".tern/worktree-sessions/setup",
-	shell_hook = ".tern/worktree-sessions/shell",
+-- The user-editable starting file, and the defaults: both are this text.
+M.TEMPLATE = [[
+{
+  "panel_ratio": 0.22,
+  "tabs": [
+    { "name": "shell", "panes": [ {} ] }
+  ],
+  "setup_hook": ".tern/worktree-sessions/setup",
+  "shell_hook": ".tern/worktree-sessions/shell"
 }
+]]
+M.DEFAULTS = tern.json.decode(M.TEMPLATE)
 
 M.path = tern.plugin.data .. "/config.json"
 
@@ -148,16 +152,5 @@ function M.tab(name)
 	return nil
 end
 
--- The user-editable starting file: the defaults written out in full.
-M.TEMPLATE = [[
-{
-  "panel_ratio": 0.22,
-  "tabs": [
-    { "name": "shell", "panes": [ {} ] }
-  ],
-  "setup_hook": ".tern/worktree-sessions/setup",
-  "shell_hook": ".tern/worktree-sessions/shell"
-}
-]]
-
 return M
+
