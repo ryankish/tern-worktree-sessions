@@ -1,4 +1,5 @@
-local PREFIX = "tern-wt:"
+local PREFIX = "worktree-sessions:"
+local PREFIX_PATTERN = "^" .. string.gsub(PREFIX, "%p", "%%%0")
 local config = require("./config")
 local current_repo = nil
 local window_common_dir = nil
@@ -34,7 +35,7 @@ end
 
 local function session_identity(name)
 	local encoded_common, encoded_path = string.match(name,
-		"^tern%-wt:([0-9a-f]+):([0-9a-f]+)$")
+		PREFIX_PATTERN .. "([0-9a-f]+):([0-9a-f]+)$")
 	if not encoded_common then return nil end
 	local common_dir, path = unhex(encoded_common), unhex(encoded_path)
 	if not common_dir or not path then return nil end
@@ -50,7 +51,7 @@ local function repo_from_session(name)
 end
 
 local function inventory_launch(path, host_name, host_kind)
-	return { cwd = path, block = "worktree.inventory", args = { path, host_name, "", host_kind } }
+	return { cwd = path, block = "worktree-sessions.inventory", args = { path, host_name, "", host_kind } }
 end
 
 local function shell_quote(value)
@@ -64,7 +65,7 @@ end
 local function shell_startup(path, command)
 	local root = shell_quote(path)
 	local hook = shell_quote(path .. "/" .. config.shell_hook)
-	local init = "export TERN_WORKTREE_PATH=" .. root
+	local init = "export WORKTREE_SESSION_PATH=" .. root
 		.. "; if [ -f " .. hook .. " ]; then . " .. hook .. "; fi"
 	return init .. (command and " && " .. command or "") .. "\r"
 end
@@ -148,7 +149,7 @@ local function ensure_inventories(cx, session_id, path)
 			end
 			for _, pane in ordered do
 				local info = pane_info[pane]
-				if info and info.block == "worktree.inventory" then
+				if info and info.block == "worktree-sessions.inventory" then
 					nav = nav or pane
 				else
 					table.insert(content, pane)
@@ -196,7 +197,7 @@ local function open_inventory(cx, intent)
 	if intent == "discover" and session_identity(cx.sessions:current().name) then intent = nil end
 	local tab = pane and cx.session:tab_of(pane)
 	for _, existing in cx.session:panes() do
-		if existing.block == "worktree.inventory" and existing.tab == tab then
+		if existing.block == "worktree-sessions.inventory" and existing.tab == tab then
 			cx.layout:focus(existing.pane)
 			if intent then
 				cx.session:event(existing.pane, { ev = "action", act = intent,
@@ -211,7 +212,7 @@ local function open_inventory(cx, intent)
 	end
 	local opened = cx.layout:split(pane, "left", {
 		cwd = info.cwd,
-		block = "worktree.inventory",
+		block = "worktree-sessions.inventory",
 		args = { info.cwd, host.name, intent or "", host.kind },
 	})
 	if not opened then
@@ -339,7 +340,7 @@ local function restore_git_pane(cx, session, tab, path)
 	local nav, exited = nil, {}
 	for _, item in cx.session:panes() do
 		if item.tab == tab then
-			if item.block == "worktree.inventory" then
+			if item.block == "worktree-sessions.inventory" then
 				nav = item.pane
 			elseif not item.exited then
 				-- A live shell may be running something other than lazygit; preserve it.
@@ -352,7 +353,7 @@ local function restore_git_pane(cx, session, tab, path)
 	if not nav then
 		ensure_inventories(cx, session.id, path)
 		for _, item in cx.session:panes() do
-			if item.tab == tab and item.block == "worktree.inventory" then nav = item.pane; break end
+			if item.tab == tab and item.block == "worktree-sessions.inventory" then nav = item.pane; break end
 		end
 	end
 	if not nav then
@@ -405,7 +406,7 @@ local function open_managed_tab(cx, name)
 		pane = restore_git_pane(cx, session, tab, identity.path) or pane
 	elseif not existed then
 		for _, item in cx.session:panes() do
-			if item.tab == tab and item.block ~= "worktree.inventory" then
+			if item.tab == tab and item.block ~= "worktree-sessions.inventory" then
 				pane = item.pane
 				break
 			end
@@ -468,24 +469,24 @@ local function switch_to(cx, common_dir, path)
 	ensure_initialized(cx, session, path, starter)
 end
 
-tern.command({ id = "discover", title = "Worktree: Discover", icon = "branch", run = function(cx)
+tern.command({ id = "discover", title = "Worktree Sessions: Discover", icon = "branch", run = function(cx)
 	open_inventory(cx, "discover")
 end })
-tern.command({ id = "switch", title = "Worktree: Switch", icon = "branch", run = open_inventory })
-tern.command({ id = "new", title = "Worktree: New", icon = "plus", run = function(cx)
+tern.command({ id = "switch", title = "Worktree Sessions: Switch", icon = "branch", run = open_inventory })
+tern.command({ id = "new", title = "Worktree Sessions: New Worktree", icon = "plus", run = function(cx)
 	open_inventory(cx, "new")
 end })
-tern.command({ id = "remove", title = "Worktree: Remove", icon = "trash", run = function(cx)
+tern.command({ id = "remove", title = "Worktree Sessions: Remove Worktree", icon = "trash", run = function(cx)
 	open_inventory(cx, "remove")
 end })
-tern.command({ id = "run_setup", title = "Worktree: Run Setup", icon = "play", run = function(cx)
+tern.command({ id = "run_setup", title = "Worktree Sessions: Run Setup", icon = "play", run = function(cx)
 	open_inventory(cx, "setup")
 end })
-tern.command({ id = "open_editor", title = "Worktree: Open Editor Tab", icon = "file",
+tern.command({ id = "open_editor", title = "Worktree Sessions: Open Editor Tab", icon = "file",
 	run = function(cx) open_managed_tab(cx, "editor") end })
-tern.command({ id = "open_agents", title = "Worktree: Open Agents Tab", icon = "terminal",
+tern.command({ id = "open_agents", title = "Worktree Sessions: Open Agents Tab", icon = "terminal",
 	run = function(cx) open_managed_tab(cx, "agents") end })
-tern.command({ id = "open_git", title = "Worktree: Open Git Tab", icon = "branch",
+tern.command({ id = "open_git", title = "Worktree Sessions: Open Git Tab", icon = "branch",
 	run = function(cx) open_managed_tab(cx, "git") end })
 tern.override("new_tab", new_worktree_shell)
 
@@ -509,7 +510,7 @@ local function refresh_repo_inventories(cx, common_dir, source_pane, visible_ses
 	local refreshed = {}
 	local force_pending = force_pr
 	for _, pane in cx.session:panes() do
-		if tabs[pane.tab] and pane.block == "worktree.inventory" then
+		if tabs[pane.tab] and pane.block == "worktree-sessions.inventory" then
 			cx.session:event(pane.pane, { ev = "action", act = "managed_paths", value = paths })
 			cx.session:event(pane.pane, { ev = "action", act = "refresh", force_pr = force_pending })
 			force_pending = false
@@ -518,7 +519,7 @@ local function refresh_repo_inventories(cx, common_dir, source_pane, visible_ses
 	end
 	if source_pane and not refreshed[source_pane] then
 		local source = cx.session:pane(source_pane)
-		if source and source.block == "worktree.inventory" then
+		if source and source.block == "worktree-sessions.inventory" then
 			cx.session:event(source_pane, { ev = "action", act = "managed_paths", value = paths })
 			cx.session:event(source_pane, { ev = "action", act = "refresh", force_pr = force_pending })
 		end
@@ -527,7 +528,7 @@ local function refresh_repo_inventories(cx, common_dir, source_pane, visible_ses
 	last_visible_session = cx.sessions:current().id
 end
 
-tern.command({ id = "refresh", title = "Worktree: Refresh", icon = "refresh", run = function(cx)
+tern.command({ id = "refresh", title = "Worktree Sessions: Refresh", icon = "refresh", run = function(cx)
 	local current = cx.sessions:current()
 	local identity = session_identity(current.name)
 	if identity and (not window_common_dir or window_common_dir == identity.common_dir) then
@@ -603,7 +604,7 @@ tern.route.link(function(link, cx)
 		local common_dir = unhex(encoded_refresh)
 		if not common_dir then return { handled = true } end
 		local source = link.pane and cx.session:pane(link.pane)
-		if (not source or source.block ~= "worktree.inventory")
+		if (not source or source.block ~= "worktree-sessions.inventory")
 			and window_common_dir ~= common_dir then return { handled = true } end
 		if window_common_dir and window_common_dir ~= common_dir then return { handled = true } end
 		refresh_repo_inventories(cx, common_dir, link.pane, nil, force_pr)
@@ -621,7 +622,7 @@ tern.route.link(function(link, cx)
 		local common_dir, path, anchor = unhex(removed_common), unhex(removed_path), unhex(anchor_path)
 		if not common_dir or not path or not anchor then return { handled = true } end
 		local source = link.pane and cx.session:pane(link.pane)
-		if (not source or source.block ~= "worktree.inventory")
+		if (not source or source.block ~= "worktree-sessions.inventory")
 			and window_common_dir ~= common_dir then return { handled = true } end
 		if window_common_dir and window_common_dir ~= common_dir then return { handled = true } end
 		local current = cx.sessions:current()
@@ -668,7 +669,7 @@ tern.route.link(function(link, cx)
 	local source = link.pane and cx.session:pane(link.pane)
 	-- Delayed host effects can arrive after focus has moved away from the
 	-- inventory block. Once bound, the repo identity still scopes the link.
-	if (not source or source.block ~= "worktree.inventory")
+	if (not source or source.block ~= "worktree-sessions.inventory")
 		and window_common_dir ~= common_dir then return { handled = true } end
 	switch_to(cx, common_dir, path)
 	if action == "created" then refresh_repo_inventories(cx, common_dir) end

@@ -190,13 +190,13 @@ local function run_setup(state, cx)
 		tern.process.run({ hook, created.repo_root, created.path, created.branch }, {
 			cwd = created.path,
 			env = {
-				TERN_WORKTREE_REPO_ROOT = created.repo_root,
-				TERN_WORKTREE_PATH = created.path,
-				TERN_WORKTREE_BRANCH = created.branch,
-				TERN_WORKTREE_SETUP_SOURCE = created.source_root or created.repo_root,
-				TERN_WORKTREE_HOST = state.host,
-				TERN_WORKTREE_HOST_KIND = state.host_kind,
-				TERN_WORKTREE_SETUP_CHOICES_JSON = created.has_policy
+				WORKTREE_SESSION_REPO_ROOT = created.repo_root,
+				WORKTREE_SESSION_PATH = created.path,
+				WORKTREE_SESSION_BRANCH = created.branch,
+				WORKTREE_SESSION_SETUP_SOURCE = created.source_root or created.repo_root,
+				WORKTREE_SESSION_HOST = state.host,
+				WORKTREE_SESSION_HOST_KIND = state.host_kind,
+				WORKTREE_SESSION_SETUP_CHOICES_JSON = created.has_policy
 					and tern.json.encode(created.setup_answers) or "{}",
 			},
 			timeout_ms = 900000,
@@ -695,13 +695,13 @@ tern.block.define("inventory", {
 				if state.creating then
 					table.insert(rows, ui.text({ ui.span(state.progress or "Running setup…", "muted") }))
 				else
-					table.insert(rows, ui.el("div", { class = "wt-setup-actions" }, {
+					table.insert(rows, ui.el("div", { class = "ws-setup-actions" }, {
 						ui.el("button", {
-							key = "retry", class = "wt-setup-button primary", text = "Retry setup",
+							key = "retry", class = "ws-setup-button primary", text = "Retry setup",
 							actions = { click = "retry_setup" },
 						}),
 						ui.el("button", {
-							key = "continue", class = "wt-setup-button secondary",
+							key = "continue", class = "ws-setup-button secondary",
 							text = created.existing and "Dismiss setup failure" or "Open workspace anyway",
 							actions = { click = "continue_setup" },
 						}),
@@ -748,10 +748,10 @@ tern.block.define("inventory", {
 			if state.creating then
 				table.insert(rows, ui.text({ ui.span(state.progress, "muted") }))
 			else
-				table.insert(rows, ui.el("div", { class = "wt-setup-actions" }, {
-					ui.el("button", { key = "close-stale", class = "wt-setup-button primary",
+				table.insert(rows, ui.el("div", { class = "ws-setup-actions" }, {
+					ui.el("button", { key = "close-stale", class = "ws-setup-button primary",
 						text = "Close Tern session", actions = { click = "confirm_stale" } }),
-					ui.el("button", { key = "cancel-stale", class = "wt-setup-button secondary",
+					ui.el("button", { key = "cancel-stale", class = "ws-setup-button secondary",
 						text = "Cancel", actions = { click = "cancel_stale" } }),
 				}))
 			end
@@ -778,17 +778,17 @@ tern.block.define("inventory", {
 				or status.kind == "detached"
 				or status.kind == "checking")
 			local pr_control = actionable and ui.el("button", {
-				key = "pr", class = "wt-pr-button " .. button_kind,
+				key = "pr", class = "ws-pr-button " .. button_kind,
 				text = button_text, aria = status.kind == "base"
 					and "Repository pull requests" or "Pull request: " .. button_text,
 				title = button_title, actions = { click = "pr_action=" .. tostring(index) },
 			}) or ui.el("span", {
-				key = "pr", class = "wt-pr-button wt-pr-inert " .. button_kind,
+				key = "pr", class = "ws-pr-button ws-pr-inert " .. button_kind,
 				text = button_text, aria = "Pull request: " .. button_text,
 				title = button_title,
 			})
 			table.insert(items, ui.el("div", { key = "worktree-" .. tostring(index),
-				class = "wt-worktree-row" }, {
+				class = "ws-worktree-row" }, {
 				ui.node("item", {
 					key = "switch", label = (entry == active and "● " or "  ") .. label,
 					detail = entry.path, value = value, icon = "branch",

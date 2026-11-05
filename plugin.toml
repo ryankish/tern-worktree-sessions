@@ -1,8 +1,8 @@
 schema = 1
-id = "worktree"
-name = "Worktree Workspace"
+id = "worktree-sessions"
+name = "Worktree Sessions"
 version = "0.7.3"
-description = "Git worktree navigation and persistent workspace sessions."
+description = "Opens each git worktree as a persistent Tern session with editor, agent and git tabs, with optional repo-defined setup."
 icon = "git-branch"
 host = "host.luau"
 window = "window.luau"
@@ -10,6 +10,6 @@ styles = ["styles.css"]
 
 [[blocks]]
 id = "inventory"
-title = "Worktree Inventory"
+title = "Worktrees"
 icon = "git-branch"
 palette = false

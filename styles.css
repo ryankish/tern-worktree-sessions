@@ -1,10 +1,10 @@
-.sf-main[data-surface="plugin.worktree.inventory"] .wt-setup-actions {
+.sf-main[data-surface="plugin.worktree-sessions.inventory"] .ws-setup-actions {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.sf-main[data-surface="plugin.worktree.inventory"] .wt-setup-button {
+.sf-main[data-surface="plugin.worktree-sessions.inventory"] .ws-setup-button {
   box-sizing: border-box;
   width: 100%;
   padding: 8px 12px;
@@ -14,40 +14,40 @@
   cursor: pointer;
 }
 
-.sf-main[data-surface="plugin.worktree.inventory"] .wt-setup-button.primary {
+.sf-main[data-surface="plugin.worktree-sessions.inventory"] .ws-setup-button.primary {
   border: 1px solid var(--accent-fill);
   background: var(--accent-fill);
   color: white;
 }
 
-.sf-main[data-surface="plugin.worktree.inventory"] .wt-setup-button.secondary {
+.sf-main[data-surface="plugin.worktree-sessions.inventory"] .ws-setup-button.secondary {
   border: 1px solid var(--t3);
   background: transparent;
   color: var(--t1);
 }
 
-.sf-main[data-surface="plugin.worktree.inventory"] .wt-setup-button:hover {
+.sf-main[data-surface="plugin.worktree-sessions.inventory"] .ws-setup-button:hover {
   filter: brightness(1.1);
 }
 
-.sf-main[data-surface="plugin.worktree.inventory"] .wt-setup-button:focus-visible {
+.sf-main[data-surface="plugin.worktree-sessions.inventory"] .ws-setup-button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-.sf-main[data-surface="plugin.worktree.inventory"] .wt-worktree-row {
+.sf-main[data-surface="plugin.worktree-sessions.inventory"] .ws-worktree-row {
   display: flex;
   align-items: center;
   min-width: 0;
   gap: 4px;
 }
 
-.sf-main[data-surface="plugin.worktree.inventory"] .wt-worktree-row .sf-item {
+.sf-main[data-surface="plugin.worktree-sessions.inventory"] .ws-worktree-row .sf-item {
   flex: 1 1 0;
   min-width: 0;
 }
 
-.sf-main[data-surface="plugin.worktree.inventory"] .wt-pr-button {
+.sf-main[data-surface="plugin.worktree-sessions.inventory"] .ws-pr-button {
   flex: none;
   border: 1px solid var(--t3);
   border-radius: 6px;
@@ -58,25 +58,25 @@
   cursor: pointer;
 }
 
-.sf-main[data-surface="plugin.worktree.inventory"] .wt-pr-button.open,
-.sf-main[data-surface="plugin.worktree.inventory"] .wt-pr-button.draft {
+.sf-main[data-surface="plugin.worktree-sessions.inventory"] .ws-pr-button.open,
+.sf-main[data-surface="plugin.worktree-sessions.inventory"] .ws-pr-button.draft {
   color: var(--accent);
 }
 
-.sf-main[data-surface="plugin.worktree.inventory"] .wt-pr-button.merged {
+.sf-main[data-surface="plugin.worktree-sessions.inventory"] .ws-pr-button.merged {
   color: var(--ok);
 }
 
-.sf-main[data-surface="plugin.worktree.inventory"] .wt-pr-inert {
+.sf-main[data-surface="plugin.worktree-sessions.inventory"] .ws-pr-inert {
   opacity: 0.55;
   cursor: default;
 }
 
-.sf-main[data-surface="plugin.worktree.inventory"] button.wt-pr-button:hover {
+.sf-main[data-surface="plugin.worktree-sessions.inventory"] button.ws-pr-button:hover {
   border-color: var(--accent);
 }
 
-.sf-main[data-surface="plugin.worktree.inventory"] .wt-pr-button:focus-visible {
+.sf-main[data-surface="plugin.worktree-sessions.inventory"] .ws-pr-button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
