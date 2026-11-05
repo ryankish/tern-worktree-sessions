@@ -5,6 +5,10 @@ worktree its own persistent session: the tabs and programs you work with,
 already open in that worktree, a click away. New worktrees can run the repository's own
 setup, with questions asked in Tern, before anything opens.
 
+
+https://github.com/user-attachments/assets/a25d3698-ad3f-41d2-a393-ffacdcac048c
+
+
 - **One session per worktree.** Switching hides the other worktrees' tabs
   without stopping their programs. Your editor buffers and agent runs are where
   you left them.
