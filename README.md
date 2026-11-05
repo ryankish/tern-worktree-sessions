@@ -116,13 +116,13 @@ width and hook paths keep their defaults.
 }
 ```
 
-Another shape, for Claude Code users who prefer a wide editor:
+Another shape, an editor beside a dev server, with a plain shell tab:
 
 ```json
 {
   "tabs": [
     { "name": "code", "split": "right", "ratio": 0.6,
-      "panes": [ { "command": "nvim" }, { "command": "claude" } ] },
+      "panes": [ { "command": "nvim" }, { "command": "npm run dev" } ] },
     { "name": "shell" },
     { "name": "git", "pin": "right", "panes": [ { "command": "lazygit" } ] }
   ]
@@ -197,17 +197,19 @@ mkdir -p "$RESULTS_DIR"
 ### Let an agent write it
 
 The plugin includes an agent skill,
-[`worktree-sessions-setup`](skills/worktree-sessions-setup/SKILL.md), that
-teaches Claude Code, Codex and omp how to write these files for a repository:
-what to look for, what to ask you, the hook contract, and how to test the
-result. Link it where your agents look for skills (omp reads both folders):
+[`worktree-sessions-setup`](skills/worktree-sessions-setup/SKILL.md), a plain
+Markdown file that teaches a coding agent how to write these files for a
+repository: what to look for, what to ask you, the hook contract, and how to
+test the result.
+
+Use it with whichever agent you run. Either tell the agent to read that file
+(it is in the plugin directory, `tern plugin dir`) and set up Worktree Sessions
+for your repository, or link the folder into the directory your agent loads
+skills from:
 
 ```sh
-ln -s "$(tern plugin dir)/worktree-sessions/skills/worktree-sessions-setup" ~/.claude/skills/
-ln -s "$(tern plugin dir)/worktree-sessions/skills/worktree-sessions-setup" ~/.codex/skills/
+ln -s "$(tern plugin dir)/worktree-sessions/skills/worktree-sessions-setup" <your agent's skills directory>/
 ```
-
-Then ask your agent to "set up Worktree Sessions for this repo".
 
 ### Example: uv, with a shared or independent venv
 
