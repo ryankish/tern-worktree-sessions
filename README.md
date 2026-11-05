@@ -284,7 +284,8 @@ Sourced, not executed, in every new shell in the worktree, before the pane's
 command. That includes the configured panes, `Cmd+T` tabs and ordinary
 splits. `WORKTREE_SESSION_PATH` is set to the worktree root. It must use POSIX
 shell syntax (zsh, bash, sh, ksh, dash and ash work). If it fails, the error
-stays visible and that pane's command doesn't start.
+stays visible and that pane's command doesn't start. When it succeeds, the
+screen is cleared, so the line the plugin typed to run it doesn't linger.
 
 It is read from each worktree, not from the checkout you created it from. Commit
 it so new branches have it, or have `setup` write it. Shells already open keep

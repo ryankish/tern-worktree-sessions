@@ -55,12 +55,15 @@ function M.shell_quote(value)
 end
 
 -- The line typed into a new worktree shell: export the root, source the shell
--- hook if the worktree has one, then run `command` only if the hook succeeded.
+-- hook if the worktree has one, clear the screen so this line doesn't linger,
+-- then run `command`. Everything after the hook runs only if it succeeded, so
+-- a failing hook keeps its error on screen and the command doesn't start.
 function M.shell_startup(path, shell_hook, command)
 	local root = M.shell_quote(path)
 	local hook = M.shell_quote(path .. "/" .. shell_hook)
 	local init = "export WORKTREE_SESSION_PATH=" .. root
 		.. "; if [ -f " .. hook .. " ]; then . " .. hook .. "; fi"
+		.. " && printf '\\033[H\\033[2J\\033[3J'"
 	return init .. (command and " && " .. command or "") .. "\r"
 end
 

@@ -352,25 +352,26 @@ test("paths: shell_quote survives a real shell", function()
 	end
 end)
 
-test("paths: shell_startup sources the hook, then runs the command", function()
+test("paths: shell_startup sources the hook, clears the screen, then runs the command", function()
 	local dir = TMP .. "/it's a $(dir)"
 	fs.writeDir(dir .. "/.tern/worktree-sessions")
 	local hook = ".tern/worktree-sessions/shell"
+	local CLEAR = "\27[H\27[2J\27[3J"
 	local function run(command)
 		local line = paths.shell_startup(dir, hook, command)
 		eq(string.sub(line, -1), "\r", "ends with Enter")
 		return sh(string.sub(line, 1, -2), dir)
 	end
 
-	eq(run("echo ran"), "ran\n", "no hook: command still runs")
-	eq(run(nil), "", "no hook, no command")
+	eq(run("echo ran"), CLEAR .. "ran\n", "no hook: command still runs")
+	eq(run(nil), CLEAR, "no hook, no command")
 
 	fs.writeFile(dir .. "/" .. hook, "export FROM_HOOK=yes\n")
-	eq(run("echo \"$FROM_HOOK|$WORKTREE_SESSION_PATH\""), "yes|" .. dir .. "\n", "hook and path")
+	eq(run("echo \"$FROM_HOOK|$WORKTREE_SESSION_PATH\""), CLEAR .. "yes|" .. dir .. "\n", "hook and path")
 
 	fs.writeFile(dir .. "/" .. hook, "echo hook failed; return 1\n")
-	local out = run("echo should-not-run")
-	eq(out, "hook failed\n", "failing hook stops the command")
+	eq(run("echo should-not-run"), "hook failed\n", "failing hook keeps its error and stops the command")
+	eq(run(nil), "hook failed\n", "failing hook is not cleared for a plain shell either")
 	fs.removeDir(TMP)
 end)
 
