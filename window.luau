@@ -1,6 +1,8 @@
-local PREFIX = "worktree-sessions:"
-local PREFIX_PATTERN = "^" .. string.gsub(PREFIX, "%p", "%%%0")
 local config = require("./config")
+local paths = require("./paths")
+local hex, unhex = paths.hex, paths.unhex
+local session_name, session_identity = paths.session_name, paths.session_identity
+local repo_from_session, within = paths.repo_from_session, paths.within
 local current_repo = nil
 local window_common_dir = nil
 local host_kind_sent = {}
@@ -13,61 +15,8 @@ local last_visible_session = nil
 local last_host_id = nil
 local last_host_state = nil
 
-local function hex(bytes)
-	return (string.gsub(bytes, ".", function(byte)
-		return string.format("%02x", string.byte(byte))
-	end))
-end
-
-local function unhex(value)
-	if #value == 0 or #value % 2 ~= 0 or not string.match(value, "^[0-9a-f]+$") then
-		return nil
-	end
-	return (string.gsub(value, "..", function(byte)
-		return string.char(tonumber(byte, 16))
-	end))
-end
-
-local function session_name(common_dir, path)
-	-- Exact paths keep identity independent of the branch and avoid hash collisions.
-	return PREFIX .. hex(common_dir) .. ":" .. hex(path)
-end
-
-local function session_identity(name)
-	local encoded_common, encoded_path = string.match(name,
-		PREFIX_PATTERN .. "([0-9a-f]+):([0-9a-f]+)$")
-	if not encoded_common then return nil end
-	local common_dir, path = unhex(encoded_common), unhex(encoded_path)
-	if not common_dir or not path then return nil end
-	return { common_dir = common_dir, path = path }
-end
-
-local function repo_from_session(name)
-	local identity = session_identity(name)
-	if not identity then return nil end
-	local common_dir = identity.common_dir
-	local root = string.gsub(common_dir, "/%.git$", "")
-	return string.match(root, "([^/]+)$") or root
-end
-
 local function inventory_launch(path, host_name, host_kind)
 	return { cwd = path, block = "worktree-sessions.inventory", args = { path, host_name, "", host_kind } }
-end
-
-local function shell_quote(value)
-	return "'" .. string.gsub(value, "'", "'\"'\"'") .. "'"
-end
-
-local function within(path, root)
-	return path == root or root == "/" or string.sub(path, 1, #root + 1) == root .. "/"
-end
-
-local function shell_startup(path, command)
-	local root = shell_quote(path)
-	local hook = shell_quote(path .. "/" .. config.shell_hook)
-	local init = "export WORKTREE_SESSION_PATH=" .. root
-		.. "; if [ -f " .. hook .. " ]; then . " .. hook .. "; fi"
-	return init .. (command and " && " .. command or "") .. "\r"
 end
 
 local function start_shell(cx, pane, path, command)
@@ -79,7 +28,7 @@ local function start_shell(cx, pane, path, command)
 		if command then cx:run(pane, command .. "\r") end
 		return
 	end
-	cx:run(pane, shell_startup(path, command))
+	cx:run(pane, paths.shell_startup(path, config.shell_hook, command))
 end
 
 local function leaves(tree, into)
@@ -575,7 +524,7 @@ local function maybe_auto_refresh(cx)
 end
 
 tern.route.link(function(link, cx)
-	local encoded_github = string.match(link.url, "^tern%-worktree://github/([0-9a-f]+)$")
+	local encoded_github = string.match(link.url, "^worktree%-sessions://github/([0-9a-f]+)$")
 	if encoded_github then
 		local url = unhex(encoded_github)
 		if not url or #url > 4096 or not string.match(url, "^https://[^/%s]+/") then
@@ -609,10 +558,10 @@ tern.route.link(function(link, cx)
 		end
 		return { handled = true }
 	end
-	local encoded_refresh = string.match(link.url, "^tern%-worktree://refresh/([0-9a-f]+)$")
+	local encoded_refresh = string.match(link.url, "^worktree%-sessions://refresh/([0-9a-f]+)$")
 	local force_pr = false
 	if not encoded_refresh then
-		encoded_refresh = string.match(link.url, "^tern%-worktree://refresh%-pr/([0-9a-f]+)$")
+		encoded_refresh = string.match(link.url, "^worktree%-sessions://refresh%-pr/([0-9a-f]+)$")
 		force_pr = encoded_refresh ~= nil
 	end
 	if encoded_refresh then
@@ -626,11 +575,11 @@ tern.route.link(function(link, cx)
 		return { handled = true }
 	end
 	local removed_common, removed_path, anchor_path = string.match(link.url,
-		"^tern%-worktree://removed/([0-9a-f]+)/([0-9a-f]+)/([0-9a-f]+)$")
+		"^worktree%-sessions://removed/([0-9a-f]+)/([0-9a-f]+)/([0-9a-f]+)$")
 	local stale_cleanup = false
 	if not removed_common then
 		removed_common, removed_path, anchor_path = string.match(link.url,
-			"^tern%-worktree://stale%-cleanup/([0-9a-f]+)/([0-9a-f]+)/([0-9a-f]+)$")
+			"^worktree%-sessions://stale%-cleanup/([0-9a-f]+)/([0-9a-f]+)/([0-9a-f]+)$")
 		stale_cleanup = removed_common ~= nil
 	end
 	if removed_common then
@@ -677,7 +626,7 @@ tern.route.link(function(link, cx)
 		return { handled = true }
 	end
 	local action, encoded_common, encoded_path = string.match(link.url,
-		"^tern%-worktree://([a-z]+)/([0-9a-f]+)/([0-9a-f]+)$")
+		"^worktree%-sessions://([a-z]+)/([0-9a-f]+)/([0-9a-f]+)$")
 	if action ~= "switch" and action ~= "created" then return nil end
 	local common_dir, path = unhex(encoded_common), unhex(encoded_path)
 	if not common_dir or not path then return { handled = true } end

@@ -350,7 +350,8 @@ tern plugin link .
 tern plugin reload worktree-sessions
 ```
 
-The parts that don't need a running Tern (the Git output parser, the
+The parts that don't need a running Tern (session names, shell quoting and
+the startup line, worktree paths, the Git output parser, the
 `setup.json` and `config.json` validators, and every JSON example in this
 README) have tests. Run them with [Lune](https://lune-org.github.io/docs):
 

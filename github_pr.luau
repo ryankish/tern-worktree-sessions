@@ -281,7 +281,7 @@ local function open_github(cx, url)
 	local encoded = string.gsub(url, ".", function(byte)
 		return string.format("%02x", string.byte(byte))
 	end)
-	cx:open("tern-worktree://github/" .. encoded)
+	cx:open("worktree-sessions://github/" .. encoded)
 end
 
 local function create_url(repo, branch, push_owner)

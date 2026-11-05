@@ -2,6 +2,8 @@ local parse = require("./parse")
 local config = require("./config")
 local setup_policy = require("./setup_policy")
 local github_pr = require("./github_pr")
+local paths = require("./paths")
+local hex, within = paths.hex, paths.within
 local ui = tern.ui
 
 local function alive(pane)
@@ -9,10 +11,6 @@ local function alive(pane)
 		if item.pane == pane then return true end
 	end
 	return false
-end
-
-local function within(path, root)
-	return path == root or root == "/" or string.sub(path, 1, #root + 1) == root .. "/"
 end
 
 local function active_worktree(state)
@@ -29,12 +27,6 @@ local function project_name(state)
 	local first = state.entries[1]
 	local path = first and first.path or state.cwd
 	return string.match(path, "([^/]+)/?$") or path
-end
-
-local function hex(bytes)
-	return (string.gsub(bytes, ".", function(byte)
-		return string.format("%02x", string.byte(byte))
-	end))
 end
 
 local function worktree_label(entry)
@@ -104,20 +96,10 @@ local function new_path(state, branch)
 		end
 	end
 	if not main then return nil, "No available Git directory can anchor the new path" end
-	local parent, name = string.match(main, "^(.*)/([^/]+)$")
-	if not parent or not name then return nil, "Cannot determine the repository parent directory" end
-	name = string.gsub(name, "%.git$", "")
-	local slug = string.gsub(branch, "[^%w._-]", "-")
-	slug = string.gsub(slug, "%-+", "-")
-	if slug == "" then return nil, "Branch name has no usable path characters" end
-	local base = parent .. "/" .. name .. "-worktrees/" .. slug
-	local path = base
-	local suffix = 2
-	while tern.fs.exists(path) do
-		path = base .. "-" .. tostring(suffix)
-		suffix += 1
-		if suffix > 1000 then return nil, "Could not choose an unused worktree path" end
-	end
+	local base, base_error = paths.worktree_base(main, branch)
+	if not base then return nil, base_error end
+	local path, path_error = paths.free_path(base, tern.fs.exists)
+	if not path then return nil, path_error end
 	return path, nil, main
 end
 
@@ -156,7 +138,7 @@ local function finish_created(state, cx)
 		cx:toast(completed and "success" or "info",
 			completed and "Worktree setup complete" or "Worktree setup skipped", created.path)
 	else
-		cx:open("tern-worktree://created/" .. hex(state.common_dir) .. "/" .. hex(created.path))
+		cx:open("worktree-sessions://created/" .. hex(state.common_dir) .. "/" .. hex(created.path))
 	end
 end
 
@@ -451,7 +433,7 @@ local function remove_worktree(state, cx)
 					state.error = nil
 					state.cwd = anchor.path
 					cx:save()
-					cx:open("tern-worktree://removed/" .. hex(state.common_dir) .. "/"
+					cx:open("worktree-sessions://removed/" .. hex(state.common_dir) .. "/"
 						.. hex(target.path) .. "/" .. hex(anchor.path))
 					refresh(state, cx)
 				end)
@@ -496,7 +478,7 @@ local function cleanup_stale_session(state, cx)
 			state.error = nil
 			state.cwd = anchor
 			cx:save()
-			cx:open("tern-worktree://stale-cleanup/" .. hex(state.common_dir) .. "/"
+			cx:open("worktree-sessions://stale-cleanup/" .. hex(state.common_dir) .. "/"
 				.. hex(target) .. "/" .. hex(anchor))
 		end)
 end
@@ -554,7 +536,7 @@ refresh = function(state, cx, force_pr)
 						local entry = active_worktree(state)
 						if entry and not entry.bare and not entry.prunable
 							and tern.fs.exists(entry.path) then
-							cx:open("tern-worktree://switch/" .. hex(state.common_dir) .. "/" .. hex(entry.path))
+							cx:open("worktree-sessions://switch/" .. hex(state.common_dir) .. "/" .. hex(entry.path))
 						end
 					end
 					cx:save()
@@ -564,7 +546,7 @@ end
 
 local function refresh_repo(state, cx)
 	if state.common_dir then
-		cx:open("tern-worktree://refresh-pr/" .. hex(state.common_dir))
+		cx:open("worktree-sessions://refresh-pr/" .. hex(state.common_dir))
 	else
 		refresh(state, cx, true)
 	end
@@ -1045,7 +1027,7 @@ tern.block.define("inventory", {
 			local entry = index and state.entries[index]
 			if entry and state.mode ~= "remove" and state.mode ~= "remove_confirm"
 				and not state.error and not entry.prunable and not entry.bare and state.common_dir then
-				cx:open("tern-worktree://switch/" .. hex(state.common_dir) .. "/" .. hex(entry.path))
+				cx:open("worktree-sessions://switch/" .. hex(state.common_dir) .. "/" .. hex(entry.path))
 			end
 		elseif ev.act == "pr_action" then
 			local index = tonumber(ev.value)

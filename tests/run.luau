@@ -288,6 +288,111 @@ test("config: a valid file is applied", function()
 	eq(custom.tabs[1].name, "code", "tab")
 end)
 
+-- paths.luau: session names, paths and shell text
+
+local paths = load_module("paths")
+
+local function sh(script, cwd)
+	local result = process.exec("sh", { "-c", script }, { cwd = cwd })
+	return result.stdout, result.ok
+end
+
+local ODD = {
+	"/src/app", "/src/my repo", "/src/it's", "/src/a:b", "/src/$(touch pwned)",
+	"/src/`id`", "/src/tab\there", "/src/new\nline", "/src/ünïcødé", "/src/\"dq\"",
+}
+
+test("paths: hex round-trips any bytes; unhex rejects non-hex", function()
+	for _, value in ODD do eq(paths.unhex(paths.hex(value)), value, "round trip") end
+	eq(paths.unhex(paths.hex("\0\255")), "\0\255", "binary")
+	for _, bad in { "", "a", "0G", "AB", "zz" } do eq(paths.unhex(bad), nil, "unhex " .. bad) end
+end)
+
+test("paths: session names round-trip and reject other names", function()
+	for _, path in ODD do
+		local identity = paths.session_identity(paths.session_name(path .. "/.git", path))
+		assert(identity, "no identity for " .. path)
+		eq(identity.common_dir, path .. "/.git", "common dir")
+		eq(identity.path, path, "path")
+	end
+	local good = paths.session_name("/r/.git", "/r")
+	for _, name in {
+		"Default",
+		"tern-wt:" .. paths.hex("/r/.git") .. ":" .. paths.hex("/r"),
+		"worktree_sessions:" .. paths.hex("/r/.git") .. ":" .. paths.hex("/r"),
+		good .. "0",
+		good .. ":ab",
+		"x" .. good,
+	} do
+		eq(paths.session_identity(name), nil, "identity of " .. name)
+	end
+end)
+
+test("paths: repository name from a session", function()
+	eq(paths.repo_from_session(paths.session_name("/src/app/.git", "/src/app-worktrees/x")), "app", "repo")
+	eq(paths.repo_from_session(paths.session_name("/srv/app.git", "/srv/app")), "app.git", "bare repo")
+	eq(paths.repo_from_session("Default"), nil, "unmanaged session")
+end)
+
+test("paths: within", function()
+	assert(paths.within("/a/b", "/a"), "child")
+	assert(paths.within("/a", "/a"), "same")
+	assert(paths.within("/anything", "/"), "root")
+	assert(not paths.within("/ab", "/a"), "sibling with shared prefix")
+	assert(not paths.within("/a", "/a/b"), "parent")
+end)
+
+test("paths: shell_quote survives a real shell", function()
+	for _, value in ODD do
+		local out = sh("printf %s " .. paths.shell_quote(value))
+		eq(out, value, "quoted " .. value)
+	end
+end)
+
+test("paths: shell_startup sources the hook, then runs the command", function()
+	local dir = TMP .. "/it's a $(dir)"
+	fs.writeDir(dir .. "/.tern/worktree-sessions")
+	local hook = ".tern/worktree-sessions/shell"
+	local function run(command)
+		local line = paths.shell_startup(dir, hook, command)
+		eq(string.sub(line, -1), "\r", "ends with Enter")
+		return sh(string.sub(line, 1, -2), dir)
+	end
+
+	eq(run("echo ran"), "ran\n", "no hook: command still runs")
+	eq(run(nil), "", "no hook, no command")
+
+	fs.writeFile(dir .. "/" .. hook, "export FROM_HOOK=yes\n")
+	eq(run("echo \"$FROM_HOOK|$WORKTREE_SESSION_PATH\""), "yes|" .. dir .. "\n", "hook and path")
+
+	fs.writeFile(dir .. "/" .. hook, "echo hook failed; return 1\n")
+	local out = run("echo should-not-run")
+	eq(out, "hook failed\n", "failing hook stops the command")
+	fs.removeDir(TMP)
+end)
+
+test("paths: worktree_base puts worktrees beside the repository", function()
+	eq(paths.worktree_base("/src/app", "feat/login"), "/src/app-worktrees/feat-login", "slashes")
+	eq(paths.worktree_base("/src/app.git", "fix"), "/src/app-worktrees/fix", "bare repo")
+	eq(paths.worktree_base("/src/app", "a  b//c"), "/src/app-worktrees/a-b-c", "runs collapse")
+	eq(paths.worktree_base("/src/app", "v1.2_rc"), "/src/app-worktrees/v1.2_rc", "kept characters")
+	for _, branch in { "", ".", ".." } do
+		local base, err = paths.worktree_base("/src/app", branch)
+		eq(base, nil, "base for " .. show(branch))
+		assert(err, "reason for " .. show(branch))
+	end
+	eq(paths.worktree_base("app", "x"), nil, "no parent directory")
+end)
+
+test("paths: free_path adds the first unused suffix", function()
+	local taken = { ["/w/x"] = true, ["/w/x-2"] = true }
+	eq(paths.free_path("/w/x", function(p) return taken[p] == true end), "/w/x-3", "suffix")
+	eq(paths.free_path("/w/y", function() return false end), "/w/y", "free")
+	local path, err = paths.free_path("/w/z", function() return true end)
+	eq(path, nil, "gives up")
+	assert(err, "reason")
+end)
+
 -- Documentation: every example config and question file must be valid.
 
 test("docs: README and example JSON pass the real validators", function()
