@@ -341,6 +341,23 @@ Tab** for each configured tab, all prefixed with **Worktree Sessions:**.
 
 Tested with Tern 0.9.10.
 
+## Development
+
+Link your clone so Tern loads it in place, and reload after edits:
+
+```sh
+tern plugin link .
+tern plugin reload worktree-sessions
+```
+
+The parts that don't need a running Tern (the Git output parser, the
+`setup.json` and `config.json` validators, and every JSON example in this
+README) have tests. Run them with [Lune](https://lune-org.github.io/docs):
+
+```sh
+lune run tests/run
+```
+
 ## License
 
 [MIT](LICENSE)
