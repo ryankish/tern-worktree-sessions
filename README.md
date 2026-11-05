@@ -202,14 +202,22 @@ Markdown file that teaches a coding agent how to write these files for a
 repository: what to look for, what to ask you, the hook contract, and how to
 test the result.
 
-Use it with whichever agent you run. Either tell the agent to read that file
-(it is in the plugin directory, `tern plugin dir`) and set up Worktree Sessions
-for your repository, or link the folder into the directory your agent loads
-skills from:
+Use it with whichever agent you run. The file is the same for all of them; only
+the folder you link it into differs:
+
+| Agent | Skills folder |
+| --- | --- |
+| Claude Code | `~/.claude/skills/` |
+| Codex | `~/.codex/skills/` |
+| omp | `~/.omp/agent/skills/`, and it also reads the Claude Code and Codex folders above |
 
 ```sh
-ln -s "$(tern plugin dir)/worktree-sessions/skills/worktree-sessions-setup" <your agent's skills directory>/
+mkdir -p ~/.claude/skills   # or the folder for your agent
+ln -s "$(tern plugin dir)/worktree-sessions/skills/worktree-sessions-setup" ~/.claude/skills/
 ```
+
+Any other agent can be told to read the file (it is in the plugin directory,
+`tern plugin dir`) and set up Worktree Sessions for your repository.
 
 ### Example: uv, with a shared or independent venv
 
