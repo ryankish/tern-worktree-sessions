@@ -324,6 +324,8 @@ cp "$WORKTREE_SESSION_SETUP_SOURCE/.tern/worktree-sessions/shell" .tern/worktree
 
 ## The panel
 
+![The Worktree Sessions panel beside an editor and an agent pane. Four worktrees: main, one branch ready to push, one with an open pull request and one merged.](docs/panel.png)
+
 | Action | Button | Key |
 | --- | --- | --- |
 | Switch to a worktree | click its row | |
