@@ -1,7 +1,7 @@
 schema = 1
 id = "worktree-sessions"
 name = "Worktree Sessions"
-version = "0.8.0"
+version = "0.9.0"
 description = "Opens each git worktree as a persistent Tern session with the tabs and commands you configure, with optional repo-defined setup."
 icon = "git-branch"
 host = "host.luau"

@@ -379,7 +379,7 @@ Tab** for each configured tab, all prefixed with **Worktree Sessions:**.
   (`gh auth status`). The plugin looks for it when it loads, so after
   installing `gh`, run `tern plugin reload worktree-sessions`.
 
-Tested with Tern 0.9.10.
+Tested with Tern 0.9.13.
 
 ## Development
 
