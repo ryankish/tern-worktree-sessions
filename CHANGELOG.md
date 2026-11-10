@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Blocks from other plugins stacked above or below the panel stay in its
+  column. They aren't counted as the tab's content, and **Open \<name\> Tab**
+  puts them back under the panel after restoring a command. Before, the panel
+  moved itself out of any column it shared.
+
 ## 0.8.0
 
 First public release.

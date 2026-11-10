@@ -54,17 +54,49 @@ local function set_share(cx, pane, direction, wanted, read_share)
 	return true
 end
 
+local INVENTORY = "worktree-sessions.inventory"
+
+local function tab_panes(cx, tab_id)
+	local panes = {}
+	for _, pane in cx.session:panes() do
+		if pane.tab == tab_id then panes[pane.pane] = pane end
+	end
+	return panes
+end
+
+-- The panes of the worktree column, as a set, or nil when the panel isn't at the
+-- left edge. The column is the left side of the tab's root split. Besides the
+-- panel it may hold other plugins' blocks stacked above or below it; they stay
+-- in the column and aren't tab content. Anything else there needs repairing.
+local function worktree_column(layout, nav, panes)
+	local root = layout and layout.root
+	if not root or root.split ~= "right" or not root[1] then return nil end
+	local ordered = {}
+	leaves(root[1], ordered)
+	local column, found = {}, false
+	for _, pane in ordered do
+		local info = panes[pane]
+		if pane == nav then
+			found = true
+		elseif not (info and info.block) then
+			return nil
+		end
+		column[pane] = true
+	end
+	return found and column or nil
+end
+
+-- The worktree column's share of the tab's width, or nil when it isn't at the left edge.
+local function column_share(cx, tab_id, nav)
+	local layout = cx.session:layout(tab_id)
+	if not worktree_column(layout, nav, tab_panes(cx, tab_id)) then return nil end
+	return layout.root.ratio or 0.5
+end
+
 local function normalize_ratios(cx, tab, nav)
 	local key = "layout-v2:" .. tostring(tab.id)
 	if tern.kv.get(key) then return end
-	local function root_share()
-		local layout = cx.session:layout(tab.id)
-		local root = layout and layout.root
-		if root and root.split == "right" and root[1] and root[1].pane == nav then
-			return root.ratio or 0.5
-		end
-		return nil
-	end
+	local function root_share() return column_share(cx, tab.id, nav) end
 	if not set_share(cx, nav, "right", config.panel_ratio, root_share) then return end
 	local tab_config = config.tab(tab.name)
 	if tab_config and #tab_config.panes > 1 then
@@ -92,23 +124,26 @@ local function ensure_inventories(cx, session_id, path)
 			if not layout then continue end
 			local ordered = {}
 			leaves(layout.root, ordered)
-			local nav, content = nil, {}
-			local pane_info = {}
-			for _, pane in cx.session:panes() do
-				if pane.tab == tab.id then pane_info[pane.pane] = pane end
-			end
+			local panes = tab_panes(cx, tab.id)
+			local nav = nil
 			for _, pane in ordered do
-				local info = pane_info[pane]
-				if info and info.block == "worktree-sessions.inventory" then
-					nav = nav or pane
-				else
+				local info = panes[pane]
+				if info and info.block == INVENTORY then nav = nav or pane end
+			end
+			local column = nav and worktree_column(layout, nav, panes)
+			local content = {}
+			for _, pane in ordered do
+				local info = panes[pane]
+				if not (info and info.block == INVENTORY) and not (column and column[pane]) then
 					table.insert(content, pane)
 				end
 			end
 			if not nav and content[1] then
 				nav = cx.layout:split(content[1], "left", inventory_launch(path, host_name, host.kind),
 					{ focus = false })
-				if not nav then
+				if nav then
+					column = worktree_column(cx.session:layout(tab.id), nav, tab_panes(cx, tab.id))
+				else
 					cx:toast("error", "Could not show worktrees in " .. (tab.name or "tab"))
 				end
 			end
@@ -117,10 +152,7 @@ local function ensure_inventories(cx, session_id, path)
 					cx.session:event(nav, { ev = "action", act = "host_kind", value = host.kind })
 					host_kind_sent[nav] = true
 				end
-				layout = cx.session:layout(tab.id)
-				local at_left = layout and layout.root.split == "right"
-					and layout.root[1] and layout.root[1].pane == nav
-				if not at_left and content[1] then
+				if not column and content[1] then
 					cx.layout:move(nav, content[1], "left", { focus = false })
 					local tab_config = config.tab(tab.name)
 					if tab_config and #tab_config.panes == #content then
@@ -283,26 +315,38 @@ local function ensure_initialized(cx, session, path, starter)
 	initialized_sessions[session.id] = true
 end
 
+local function find_inventory(cx, tab)
+	for _, item in cx.session:panes() do
+		if item.tab == tab and item.block == INVENTORY then return item.pane end
+	end
+	return nil
+end
+
 -- Reopens the command of a one-pane tab whose program exited.
 local function restore_command_pane(cx, session, tab, path, command)
-	local nav, exited = nil, {}
+	local nav = find_inventory(cx, tab)
+	local layout = cx.session:layout(tab)
+	local column = nav and worktree_column(layout, nav, tab_panes(cx, tab)) or {}
+	local exited = {}
 	for _, item in cx.session:panes() do
-		if item.tab == tab then
-			if item.block == "worktree-sessions.inventory" then
-				nav = item.pane
-			elseif not item.exited then
-				-- A live shell may be running something else; preserve it.
-				return item.pane
-			else
-				table.insert(exited, item.pane)
-			end
+		if item.tab == tab and item.block ~= INVENTORY and not column[item.pane] then
+			-- A live shell may be running something else; preserve it.
+			if not item.exited then return item.pane end
+			table.insert(exited, item.pane)
+		end
+	end
+	-- Other plugins' blocks in the column, top to bottom, to put back under the panel.
+	local stacked = {}
+	if column[nav] then
+		local ordered = {}
+		leaves(layout.root[1], ordered)
+		for _, pane in ordered do
+			if pane ~= nav then table.insert(stacked, pane) end
 		end
 	end
 	if not nav then
 		ensure_inventories(cx, session.id, path)
-		for _, item in cx.session:panes() do
-			if item.tab == tab and item.block == "worktree-sessions.inventory" then nav = item.pane; break end
-		end
+		nav = find_inventory(cx, tab)
 	end
 	if not nav then
 		cx:toast("error", "Cannot restore pane", "Worktree inventory pane is unavailable")
@@ -314,16 +358,15 @@ local function restore_command_pane(cx, session, tab, path, command)
 		cx:toast("error", "Cannot restore pane")
 		return nil
 	end
-	start_shell(cx, pane, path, command)
-	local function nav_share()
-		local layout = cx.session:layout(tab)
-		local root = layout and layout.root
-		if root and root.split == "right" and root[1] and root[1].pane == nav then
-			return root.ratio or 0.5
-		end
-		return nil
+	-- Splitting the panel put the new pane inside the column, above the stacked
+	-- blocks; moving them back under the panel leaves it to the column's right.
+	local above = nav
+	for _, block in stacked do
+		cx.layout:move(block, above, "down", { focus = false })
+		above = block
 	end
-	set_share(cx, nav, "right", config.panel_ratio, nav_share)
+	start_shell(cx, pane, path, command)
+	set_share(cx, nav, "right", config.panel_ratio, function() return column_share(cx, tab, nav) end)
 	keep_pinned_last(cx, session.id)
 	return pane
 end
@@ -355,7 +398,7 @@ local function open_managed_tab(cx, name)
 		pane = restore_command_pane(cx, session, tab, identity.path, tab_config.panes[1].command) or pane
 	elseif not existed then
 		for _, item in cx.session:panes() do
-			if item.tab == tab and item.block ~= "worktree-sessions.inventory" then
+			if item.tab == tab and not item.block then
 				pane = item.pane
 				break
 			end

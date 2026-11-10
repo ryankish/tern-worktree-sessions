@@ -354,6 +354,11 @@ Tab** for each configured tab, all prefixed with **Worktree Sessions:**.
 - If a configured tab is closed, **Open \<name\> Tab** recreates it. Opening a
   one-pane tab whose program exited, such as a lazygit tab, starts the command
   again.
+- **Other plugins' blocks in the panel's column.** A plugin may stack its own
+  blocks above or below the panel, in the same column. The panel stays put,
+  those blocks aren't counted as the tab's content, and when **Open \<name\>
+  Tab** brings back a tab's command, they return under the panel. A terminal
+  split into the column is handled as before: the panel moves to its left.
 - **Remote hosts:** the panel runs Git on the host of the pane you opened it
   from. The plugin must be installed there. The layout comes from the machine
   running the Tern window. `setup_hook` is read on the worktree's host, so if
